@@ -1,0 +1,16 @@
+datasets[audio]
+transformers
+peft
+hf_transfer
+librosa
+evaluate
+jiwer
+gradio
+bitsandbytes
+accelerate 
+loralib
+tensorboard
+gradio
+streamlit
+openai-whisper
+setuptools-rust
