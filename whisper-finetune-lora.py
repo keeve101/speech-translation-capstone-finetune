@@ -6,6 +6,7 @@ from transformers import WhisperProcessor, WhisperForConditionalGeneration, Seq2
 from transformers.trainer_pt_utils import IterableDatasetShard
 from transformers.models.whisper.english_normalizer import EnglishTextNormalizer, BasicTextNormalizer
 from torch.utils.data import IterableDataset
+from torch.utils.tensorboard import SummaryWriter
 from peft import LoraConfig, get_peft_model
 
 from dataclasses import dataclass
@@ -57,19 +58,26 @@ LANGUAGES = {
     "vi": "vietnamese",
 }
 
-language_code = "hi"
+language_code = "zh-CN"
 
-dataset_path = "keeve101/common-voice-20.0-2024-12-06-hi-split"
+dataset_path = "keeve101/common-voice-unified-splits"
 
 streaming = False
 
 dataset = IterableDatasetDict()
 
-dataset["train"] = load_dataset(dataset_path, split="train", streaming=streaming)
-dataset["validation"] = load_dataset(dataset_path, split="dev", streaming=streaming)
-dataset["test"] = load_dataset(dataset_path, split="test", streaming=streaming)
+split_percentage = "10%"
 
-processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3-turbo", langauge=LANGUAGES[language_code], task="transcribe")
+train_split = "train" if split_percentage == "" else f"train[:{split_percentage}]"
+dev_split = "dev" if split_percentage == "" else f"dev[:{split_percentage}]"
+test_split = "test" if split_percentage == "" else f"test[:{split_percentage}]"
+
+subsample_size = 30
+dataset["train"] = load_dataset(dataset_path, language_code, split=train_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
+dataset["validation"] = load_dataset(dataset_path, language_code, split=dev_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
+dataset["test"] = load_dataset(dataset_path, language_code, split=test_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
+
+processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3-turbo", langauge=LANGUAGES[language_code], task="transcribe", predict_timestamps=False)
 
 dataset = dataset.cast_column("audio", Audio(sampling_rate=16000)) # cast all to 16kHz
 
@@ -118,9 +126,10 @@ def compute_metrics(pred, do_normalize_eval=True):
         pred_str = [pred_str[i] for i in range(len(pred_str)) if len(label_str[i]) > 0]
         label_str = [label_str[i] for i in range(len(label_str)) if len(label_str[i]) > 0]
 
-    wer = 100 * metric.compute(predictions=pred_str, references=label_str)
+    wer = 100 * wer_metric.compute(predictions=pred_str, references=label_str)
+    bleu = bleu_metric.compute(predictions=pred_str, references=label_str, tokenize="intl") 
 
-    return {"wer": wer}
+    return {"wer": wer, "sacrebleu": bleu}
 
 # remove all columns, leave just columns input_features and labels
 vectorized_dataset = dataset.map(prepare_dataset, remove_columns=list(next(iter(dataset.values())).features)).with_format("torch")
@@ -135,13 +144,17 @@ vectorized_dataset["train"] = vectorized_dataset["train"].filter(is_audio_in_len
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
 
-metric = evaluate.load("wer")
+wer_metric = evaluate.load("wer")
+bleu_metric = evaluate.load("sacrebleu")
 
 model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3-turbo")
 
 model.config.forced_decoder_ids = None
 model.config.suppress_tokens = []
 model.config.use_cache = False
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model.to(device)
 
 lora_config = LoraConfig(
     r=32,
@@ -165,17 +178,18 @@ If experience OOM, reduce per_device_train_batch_size by factor of 2 and increas
 
 training_args = Seq2SeqTrainingArguments(
     output_dir="./output",
-    per_device_train_batch_size=2,
-    gradient_accumulation_steps=16,  # increase by 2x for every 2x decrease in batch size
+    per_device_train_batch_size=32,
+    gradient_accumulation_steps=2,  # increase by 2x for every 2x decrease in batch size
     learning_rate=1e-5,
     warmup_steps=500,
-    max_steps=500,
-    gradient_checkpointing=True,
+    max_steps=1000,
+    # gradient_checkpointing=True,
     fp16=True,
     evaluation_strategy="steps", # do_eval is True if "steps" is passed
-    per_device_eval_batch_size=8,
+    per_device_eval_batch_size=1,
     predict_with_generate=True,
     generation_max_length=225,
+    dataloader_num_workers=16,
     save_steps=1000,
     eval_steps=100,
     logging_steps=25,
@@ -200,22 +214,52 @@ trainer = Seq2SeqTrainer(
 model.save_pretrained(training_args.output_dir)
 processor.save_pretrained(training_args.output_dir)
 
+# Initialize TensorBoard writer
+writer = SummaryWriter(log_dir=training_args.output_dir)
+
+# Evaluate the base model before fine-tuning
+print("Evaluating base model...")
+base_results = trainer.evaluate(eval_dataset=vectorized_dataset["test"])
+
+# Log base model results to TensorBoard
+for key, value in base_results.items():
+    print(key, value)
+    if isinstance(value, dict):
+        value = value["score"]
+    writer.add_scalar(f"eval/base_{key}", value, 0)  # Step 0 for base model
+
+# Save base model results to file
+base_results_file = "./base_evaluation_results.txt"
+with open(base_results_file, "w") as f:
+    f.write("Base model evaluation results:\n")
+    for key, value in base_results.items():
+        if isinstance(value, dict):
+            value = value["score"]
+        f.write(f"{key}: {value}\n")
+
+print("Base model evaluation complete. Starting training...")
+
+# Start training
 trainer.train()
 
-kwargs = {
-    "model_name": f"Whisper Large v3 Turbo (Fine-tuned): {language_code}",
-    "finetuned_from": "openai/whisper-large-v3-turbo",
-    "tasks": "automatic-speech-recognition",
-}
-
-# trainer.push_to_hub(**kwargs)
-
-# last eval
+# Evaluate fine-tuned model
+print("Evaluating fine-tuned model...")
 final_results = trainer.evaluate(eval_dataset=vectorized_dataset["test"])
 
-results_file = "./final_evaluation_results.txt"
+# Log fine-tuned results to TensorBoard
+for key, value in final_results.items():
+    if isinstance(value, dict):
+        value = value["score"]
+    writer.add_scalar(f"eval/finetuned_{key}", value, training_args.max_steps)
 
+# Save fine-tuned results to file
+results_file = "./final_evaluation_results.txt"
 with open(results_file, "w") as f:
     f.write("Final evaluation results:\n")
     for key, value in final_results.items():
+        if isinstance(value, dict):
+            value = value["score"]
         f.write(f"{key}: {value}\n")
+
+# Close the TensorBoard writer
+writer.close()

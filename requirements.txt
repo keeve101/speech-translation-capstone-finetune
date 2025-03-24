@@ -14,3 +14,4 @@ gradio
 streamlit
 openai-whisper
 setuptools-rust
+sacrebleu
