@@ -72,8 +72,8 @@ train_split = "train" if split_percentage == "" else f"train[:{split_percentage}
 dev_split = "dev" if split_percentage == "" else f"dev[:{split_percentage}]"
 test_split = "test" if split_percentage == "" else f"test[:{split_percentage}]"
 
-subsample_size = 30
-dataset["train"] = load_dataset(dataset_path, language_code, split=train_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
+subsample_size = 500
+dataset["train"] = load_dataset(dataset_path, language_code, split=train_split, streaming=streaming)
 dataset["validation"] = load_dataset(dataset_path, language_code, split=dev_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
 dataset["test"] = load_dataset(dataset_path, language_code, split=test_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
 
@@ -173,6 +173,8 @@ def make_inputs_require_grad(module, input, output):
 
 model.model.encoder.conv1.register_forward_hook(make_inputs_require_grad)
 
+model.gradient_checkpointing_enable({"use_reentrant": False})
+
 model = get_peft_model(model, lora_config)
 
 """
@@ -185,8 +187,8 @@ If experience OOM, reduce per_device_train_batch_size by factor of 2 and increas
 
 training_args = Seq2SeqTrainingArguments(
     output_dir="./output",
-    per_device_train_batch_size=2,
-    gradient_accumulation_steps=16,  # increase by 2x for every 2x decrease in batch size
+    per_device_train_batch_size=16,
+    gradient_accumulation_steps=2,  # increase by 2x for every 2x decrease in batch size
     learning_rate=1e-5,
     warmup_steps=500,
     max_steps=1000,
@@ -196,9 +198,9 @@ training_args = Seq2SeqTrainingArguments(
     per_device_eval_batch_size=1,
     predict_with_generate=True,
     generation_max_length=225,
-    save_steps=1000,
-    eval_steps=100,
-    logging_steps=25,
+    save_steps=200,
+    eval_steps=200,
+    logging_steps=100,
     report_to=["tensorboard"],
     load_best_model_at_end=True,
     metric_for_best_model="sacrebleu",
