@@ -167,7 +167,7 @@ lora_config = LoraConfig(
     bias="none",
 )
 
-#model.enable_input_require_grads()
+model.enable_input_require_grads()
 
 model = get_peft_model(model, lora_config)
 
@@ -197,8 +197,8 @@ training_args = Seq2SeqTrainingArguments(
     logging_steps=25,
     report_to=["tensorboard"],
     load_best_model_at_end=True,
-    metric_for_best_model="bleu",
-    greater_is_better=False,
+    metric_for_best_model="sacrebleu",
+    greater_is_better=True,
     push_to_hub=False,
 )
 
