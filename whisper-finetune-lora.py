@@ -7,7 +7,7 @@ from transformers.trainer_pt_utils import IterableDatasetShard
 from transformers.models.whisper.english_normalizer import EnglishTextNormalizer, BasicTextNormalizer
 from torch.utils.data import IterableDataset
 from torch.utils.tensorboard import SummaryWriter
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, PeftModel
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
@@ -127,9 +127,11 @@ def compute_metrics(pred, do_normalize_eval=True):
         label_str = [label_str[i] for i in range(len(label_str)) if len(label_str[i]) > 0]
 
     wer = 100 * wer_metric.compute(predictions=pred_str, references=label_str)
+    cer = 100 * cer_metric.compute(predictions=pred_str, references=label_str)
     bleu = bleu_metric.compute(predictions=pred_str, references=label_str, tokenize="intl") 
+    bleu_score = bleu["score"]
 
-    return {"wer": wer, "sacrebleu": bleu}
+    return {"wer": wer, "cer": cer, "sacrebleu": bleu_score}
 
 # remove all columns, leave just columns input_features and labels
 vectorized_dataset = dataset.map(prepare_dataset, remove_columns=list(next(iter(dataset.values())).features)).with_format("torch")
@@ -145,6 +147,7 @@ vectorized_dataset["train"] = vectorized_dataset["train"].filter(is_audio_in_len
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
 
 wer_metric = evaluate.load("wer")
+cer_metric = evaluate.load("cer")
 bleu_metric = evaluate.load("sacrebleu")
 
 model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3-turbo")
@@ -164,7 +167,7 @@ lora_config = LoraConfig(
     bias="none",
 )
 
-model.enable_input_require_grads()
+#model.enable_input_require_grads()
 
 model = get_peft_model(model, lora_config)
 
@@ -178,24 +181,23 @@ If experience OOM, reduce per_device_train_batch_size by factor of 2 and increas
 
 training_args = Seq2SeqTrainingArguments(
     output_dir="./output",
-    per_device_train_batch_size=32,
-    gradient_accumulation_steps=2,  # increase by 2x for every 2x decrease in batch size
+    per_device_train_batch_size=2,
+    gradient_accumulation_steps=16,  # increase by 2x for every 2x decrease in batch size
     learning_rate=1e-5,
     warmup_steps=500,
     max_steps=1000,
-    # gradient_checkpointing=True,
+    gradient_checkpointing=True,
     fp16=True,
     evaluation_strategy="steps", # do_eval is True if "steps" is passed
     per_device_eval_batch_size=1,
     predict_with_generate=True,
     generation_max_length=225,
-    dataloader_num_workers=16,
     save_steps=1000,
     eval_steps=100,
     logging_steps=25,
     report_to=["tensorboard"],
     load_best_model_at_end=True,
-    metric_for_best_model="wer",
+    metric_for_best_model="bleu",
     greater_is_better=False,
     push_to_hub=False,
 )
@@ -221,13 +223,6 @@ writer = SummaryWriter(log_dir=training_args.output_dir)
 print("Evaluating base model...")
 base_results = trainer.evaluate(eval_dataset=vectorized_dataset["test"])
 
-# Log base model results to TensorBoard
-for key, value in base_results.items():
-    print(key, value)
-    if isinstance(value, dict):
-        value = value["score"]
-    writer.add_scalar(f"eval/base_{key}", value, 0)  # Step 0 for base model
-
 # Save base model results to file
 base_results_file = "./base_evaluation_results.txt"
 with open(base_results_file, "w") as f:
@@ -245,12 +240,6 @@ trainer.train()
 # Evaluate fine-tuned model
 print("Evaluating fine-tuned model...")
 final_results = trainer.evaluate(eval_dataset=vectorized_dataset["test"])
-
-# Log fine-tuned results to TensorBoard
-for key, value in final_results.items():
-    if isinstance(value, dict):
-        value = value["score"]
-    writer.add_scalar(f"eval/finetuned_{key}", value, training_args.max_steps)
 
 # Save fine-tuned results to file
 results_file = "./final_evaluation_results.txt"
