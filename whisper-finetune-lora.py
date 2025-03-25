@@ -167,7 +167,7 @@ lora_config = LoraConfig(
     bias="none",
 )
 
-model.enable_input_require_grads()
+# model.enable_input_require_grads()
 
 model = get_peft_model(model, lora_config)
 
@@ -186,7 +186,7 @@ training_args = Seq2SeqTrainingArguments(
     learning_rate=1e-5,
     warmup_steps=500,
     max_steps=1000,
-    gradient_checkpointing=True,
+    gradient_checkpointing=False,
     fp16=True,
     evaluation_strategy="steps", # do_eval is True if "steps" is passed
     per_device_eval_batch_size=1,
