@@ -204,6 +204,8 @@ training_args = Seq2SeqTrainingArguments(
     metric_for_best_model="sacrebleu",
     greater_is_better=True,
     push_to_hub=False,
+    remove_unused_columns=False,  # required as the PeftModel forward doesn't have the signature of the wrapped model's forward
+    label_names=["labels"],  # same reason as above
 )
 
 trainer = Seq2SeqTrainer(
