@@ -7,11 +7,37 @@ from transformers.trainer_pt_utils import IterableDatasetShard
 from transformers.models.whisper.english_normalizer import EnglishTextNormalizer, BasicTextNormalizer
 from torch.utils.data import IterableDataset
 from torch.utils.tensorboard import SummaryWriter
-from peft import LoraConfig, get_peft_model, PeftModel
+from peft import LoraConfig, get_peft_model, PeftModel, PeftConfig
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
 
+LANGUAGES = { 
+    # full forms derived from https://github.com/openai/whisper/blob/main/whisper/tokenizer.py
+    "zh-CN": "chinese",
+    "en": "english",
+    "hi": "hindi",
+    "id": "indonesian",
+    "th": "thai",
+    "vi": "vietnamese",
+}
+language_code = "th"
+
+
+model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3-turbo")
+
+model.config.forced_decoder_ids = None
+model.config.suppress_tokens = []
+model.config.use_cache = False
+
+processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3-turbo", langauge=LANGUAGES[language_code], task="transcribe", predict_timestamps=False)
+
+"""
+In our pre-processing strategy, we will do normalization as described in the Whisper paper with the exception of lower-case and punctuation removal. 
+
+However, during evaluation the normalization is fully applied
+"""
+normalizer = EnglishTextNormalizer() if language_code == "en" else BasicTextNormalizer()
 
 @dataclass
 class DataCollatorSpeechSeq2SeqWithPadding:
@@ -40,56 +66,8 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
         return batch
 
-# trainer callback to reinitialise and reshuffle the streamable datasets at the beginning of each epoch
-class ShuffleCallback(TrainerCallback):
-    def on_epoch_begin(self, args, state, control, train_dataloader, **kwargs):
-        if isinstance(train_dataloader.dataset, IterableDatasetShard):
-            pass  # set_epoch() is handled by the Trainer
-        elif isinstance(train_dataloader.dataset, IterableDataset):
-            train_dataloader.dataset.set_epoch(train_dataloader.dataset._epoch + 1)
-
-LANGUAGES = { 
-    # full forms derived from https://github.com/openai/whisper/blob/main/whisper/tokenizer.py
-    "zh-CN": "chinese",
-    "en": "english",
-    "hi": "hindi",
-    "id": "indonesian",
-    "th": "thai",
-    "vi": "vietnamese",
-}
-
-language_code = "hi"
-
-dataset_path = "keeve101/common-voice-unified-splits"
-
-streaming = False
-
-dataset = IterableDatasetDict()
-
-split_percentage = ""
-
-train_split = "train" if split_percentage == "" else f"train[:{split_percentage}]"
-dev_split = "dev" if split_percentage == "" else f"dev[:{split_percentage}]"
-test_split = "test" if split_percentage == "" else f"test[:{split_percentage}]"
-
-subsample_size = 500
-dataset["train"] = load_dataset(dataset_path, language_code, split=train_split, streaming=streaming)
-dataset["validation"] = load_dataset(dataset_path, language_code, split=dev_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
-dataset["test"] = load_dataset(dataset_path, language_code, split=test_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
-
-processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3-turbo", langauge=LANGUAGES[language_code], task="transcribe", predict_timestamps=False)
-
-dataset = dataset.cast_column("audio", Audio(sampling_rate=16000)) # cast all to 16kHz
-
-"""
-In our pre-processing strategy, we will do normalization as described in the Whisper paper with the exception of lower-case and punctuation removal. 
-
-However, during evaluation the normalization is fully applied
-"""
-normalizer = EnglishTextNormalizer() if language_code == "en" else BasicTextNormalizer()
-
 def prepare_dataset(batch, do_lower_case=False, do_remove_punctuation=False):
-    audio = batch["audio"]
+    audio = batch[f"{language_code}_audio"]
     
     # compute log-Mel input features with the processor feature extractor
     batch["input_features"] = processor.feature_extractor(audio["array"], sampling_rate=audio["sampling_rate"]).input_features[0] 
@@ -97,7 +75,7 @@ def prepare_dataset(batch, do_lower_case=False, do_remove_punctuation=False):
     # computer input length of audio in seconds
     batch["input_length"] = len(audio["array"]) / audio["sampling_rate"]
     
-    transcription = batch["sentence"]
+    transcription = batch[f"{language_code}_transcription"]
 
     if do_lower_case:
         transcription = transcription.lower()
@@ -107,6 +85,13 @@ def prepare_dataset(batch, do_lower_case=False, do_remove_punctuation=False):
     # encode target text to label ids
     batch["labels"] = processor.tokenizer(transcription).input_ids
     return batch
+
+
+fleurs_reduced_dataset_path = "keeve101/fleurs-reduced"
+
+fleurs_reduced_dataset = load_dataset(fleurs_reduced_dataset_path, language_code)
+
+dataset = fleurs_reduced_dataset.cast_column(f"{language_code}_audio", Audio(sampling_rate=16000)) # cast all to 16kHz
 
 def compute_metrics(pred, do_normalize_eval=True):
     pred_ids = pred.predictions
@@ -133,60 +118,16 @@ def compute_metrics(pred, do_normalize_eval=True):
 
     return {"wer": wer, "cer": cer, "sacrebleu": bleu_score}
 
-# remove all columns, leave just columns input_features and labels
 vectorized_dataset = dataset.map(prepare_dataset, remove_columns=list(next(iter(dataset.values())).features)).with_format("torch")
-
-vectorized_dataset["train"] = vectorized_dataset["train"].shuffle(seed=0)
-
-def is_audio_in_length_range(length, max_input_length=30.0):
-    return length < max_input_length
-
-# filter out audios > 30.0 seconds as it would be truncated by processor
-vectorized_dataset["train"] = vectorized_dataset["train"].filter(is_audio_in_length_range, input_columns=["input_length"],)
-
-data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
 
 wer_metric = evaluate.load("wer")
 cer_metric = evaluate.load("cer")
 bleu_metric = evaluate.load("sacrebleu")
 
-model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3-turbo")
-
-model.config.forced_decoder_ids = None
-model.config.suppress_tokens = []
-model.config.use_cache = False
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model.to(device)
-
-lora_config = LoraConfig(
-    r=32,
-    lora_alpha=64,
-    target_modules=["q_proj", "v_proj"],
-    lora_dropout=0.05,
-    bias="none",
-)
-
-# model.enable_input_require_grads()
-def make_inputs_require_grad(module, input, output):
-    output.requires_grad_(True)
-
-model.model.encoder.conv1.register_forward_hook(make_inputs_require_grad)
-
-model.gradient_checkpointing_enable({"use_reentrant": False})
-
-model = get_peft_model(model, lora_config)
-
-"""
-Model  | Batch Size | Gradient Accumulation | Learning Rate
-small	16	2	8
-medium	2	16	1
-
-If experience OOM, reduce per_device_train_batch_size by factor of 2 and increase gradient_accumulation_steps
-"""
+data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
 
 training_args = Seq2SeqTrainingArguments(
-    output_dir=f"./{language_code}_output",
+    output_dir="./output",
     per_device_train_batch_size=16,
     gradient_accumulation_steps=2,  # increase by 2x for every 2x decrease in batch size
     learning_rate=1e-5,
@@ -209,20 +150,32 @@ training_args = Seq2SeqTrainingArguments(
     remove_unused_columns=False,  # required as the PeftModel forward doesn't have the signature of the wrapped model's forward
     label_names=["labels"],  # same reason as above
 )
+model_pre = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3-turbo")
 
-trainer = Seq2SeqTrainer(
+trainer_pre = Seq2SeqTrainer(
+    args=training_args,
+    model=model_pre,
+    train_dataset=vectorized_dataset,
+    eval_dataset=vectorized_dataset,
+    data_collator=data_collator,
+    compute_metrics=compute_metrics,
+    processing_class=processor,
+    # callbacks=[ShuffleCallback()],
+)
+print(trainer_pre.evaluate(vectorized_dataset))
+
+config = PeftConfig.from_pretrained(f"{language_code}_output/checkpoint-1000")
+model = PeftModel.from_pretrained(model, f"{language_code}_output/checkpoint-1000", is_trainable=False)
+
+trainer_post = Seq2SeqTrainer(
     args=training_args,
     model=model,
-    train_dataset=vectorized_dataset["train"],
-    eval_dataset=vectorized_dataset["validation"],
+    train_dataset=vectorized_dataset,
+    eval_dataset=vectorized_dataset,
     data_collator=data_collator,
     compute_metrics=compute_metrics,
     processing_class=processor,
     # callbacks=[ShuffleCallback()],
 )
 
-model.save_pretrained(training_args.output_dir)
-processor.save_pretrained(training_args.output_dir)
-
-# Start training
-trainer.train(resume_from_checkpoint=True)
+print(trainer_post.evaluate(vectorized_dataset, metric_key_prefix="post"))
