@@ -1,5 +1,4 @@
 import torch
-import os
 import evaluate
 
 from transformers import WhisperProcessor, WhisperForConditionalGeneration, Seq2SeqTrainingArguments, Seq2SeqTrainer
@@ -19,13 +18,13 @@ for key, dataset in dataset_dicts.items():
 
     dataset_dicts[key] = dataset.map(prepare_dataset, remove_columns=list(next(iter(dataset.values())).features), fn_kwargs=fn_kwargs).with_format("torch")
     
-    dataset["train"] = dataset["train"].shuffle(seed=0) # for consistency of evaluation
+    dataset_dicts[key]["train"] = dataset_dicts[key]["train"].shuffle(seed=0) # for consistency of evaluation
 
     def is_audio_in_length_range(length, max_input_length=30.0):
         return length < max_input_length
 
     # filter out audios > 30.0 seconds as it would be truncated by processor
-    dataset["train"] = dataset["train"].filter(is_audio_in_length_range, input_columns=["input_length"],)
+    dataset_dicts[key]["train"] = dataset_dicts[key]["train"].filter(is_audio_in_length_range, input_columns=["input_length"],)
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
 
@@ -85,9 +84,9 @@ training_args = Seq2SeqTrainingArguments(
     eval_steps=200,
     logging_steps=100,
     report_to=["tensorboard"],
-    load_best_model_at_end=True,
-    metric_for_best_model="sacrebleu",
-    greater_is_better=True,
+    #load_best_model_at_end=True,
+    #metric_for_best_model="sacrebleu",
+    #greater_is_better=True,
     push_to_hub=False,
     remove_unused_columns=False,  # required as the PeftModel forward doesn't have the signature of the wrapped model's forward
     label_names=["labels"],  # same reason as above
@@ -122,9 +121,8 @@ eval_dataset = {key: dataset_dicts[key]["validation"] for key in language_codes}
 
 print(f"Language sequence: {language_codes}")
 
-for language_code in language_codes:
-    output_dir = f"./checkpoints/{language_code}"
-    os.makedirs(output_dir, exist_ok=True)  # Ensure directory exists
+for idx, language_code in enumerate(language_codes):
+    output_dir = "./output-unified"
 
     training_args = Seq2SeqTrainingArguments(
         output_dir=output_dir,  # Set per-language checkpoint directory
@@ -132,7 +130,7 @@ for language_code in language_codes:
         gradient_accumulation_steps=2,
         learning_rate=1e-5,
         warmup_steps=500,
-        max_steps=1000,
+        max_steps=1000 + 1000 * idx,
         gradient_checkpointing=True,
         fp16=True,
         evaluation_strategy="steps",
@@ -143,9 +141,9 @@ for language_code in language_codes:
         eval_steps=200,
         logging_steps=100,
         report_to=["tensorboard"],
-        load_best_model_at_end=True,
-        metric_for_best_model="sacrebleu",
-        greater_is_better=True,
+        #load_best_model_at_end=True,
+        #metric_for_best_model="sacrebleu",
+        #greater_is_better=True,
         push_to_hub=False,
         remove_unused_columns=False,
         label_names=["labels"],
@@ -155,7 +153,7 @@ for language_code in language_codes:
         args=training_args,
         model=model,
         train_dataset=dataset_dicts[language_code]["train"],
-        eval_dataset=eval_dataset[language_code],
+        eval_dataset=eval_dataset,
         data_collator=data_collator,
         compute_metrics=compute_metrics,
         processing_class=processor,

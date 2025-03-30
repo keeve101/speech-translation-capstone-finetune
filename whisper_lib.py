@@ -77,7 +77,8 @@ However, during evaluation the normalization is fully applied
 """
 
 def prepare_dataset(batch, processor, language_code, do_lower_case=False, do_remove_punctuation=False):
-    normalizer = EnglishTextNormalizer() if language_code == "en" else BasicTextNormalizer()
+    #normalizer = EnglishTextNormalizer() if language_code == "en" else BasicTextNormalizer()
+    normalizer = BasicTextNormalizer()
 
     audio = batch["audio"]
     
