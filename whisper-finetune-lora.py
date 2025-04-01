@@ -74,7 +74,7 @@ test_split = "test" if split_percentage == "" else f"test[:{split_percentage}]"
 
 subsample_size = 500
 dataset["train"] = load_dataset(dataset_path, language_code, split=train_split, streaming=streaming)
-dataset["validation"] = load_dataset(dataset_path, language_code, split=dev_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
+dataset["validation"] = load_dataset(dataset_path, language_code, split=dev_split, streaming=streaming)
 dataset["test"] = load_dataset(dataset_path, language_code, split=test_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
 
 processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3-turbo", langauge=LANGUAGES[language_code], task="transcribe", predict_timestamps=False)

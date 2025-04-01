@@ -1,6 +1,6 @@
 import torch
 
-from datasets import IterableDatasetDict, load_dataset, Audio 
+from datasets import IterableDatasetDict, load_dataset, Audio, concatenate_datasets
 from transformers import TrainerCallback
 from transformers.trainer_pt_utils import IterableDatasetShard
 from transformers.models.whisper.english_normalizer import EnglishTextNormalizer, BasicTextNormalizer
@@ -54,15 +54,19 @@ LANGUAGES = {
     "vi": "vietnamese",
 }
 
-def take_dataset(dataset_path, language_code, split_percentage="", streaming=False, subsample_size=500):
+def take_dataset(dataset_path, language_code, split_percentage="", streaming=False, subsample_size=500, combine_train_val=False):
     dataset = IterableDatasetDict()
 
     train_split = "train" if split_percentage == "" else f"train[:{split_percentage}]"
     dev_split = "dev" if split_percentage == "" else f"dev[:{split_percentage}]"
     test_split = "test" if split_percentage == "" else f"test[:{split_percentage}]"
+    
+    if combine_train_val:
+        dataset["train"] = concatenate_datasets([load_dataset(dataset_path, language_code, split=train_split, streaming=streaming), load_dataset(dataset_path, language_code, split=dev_split, streaming=streaming)])
+    else:
+        dataset["train"] = load_dataset(dataset_path, language_code, split=train_split, streaming=streaming)
+        dataset["validation"] = load_dataset(dataset_path, language_code, split=dev_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
 
-    dataset["train"] = load_dataset(dataset_path, language_code, split=train_split, streaming=streaming)
-    dataset["validation"] = load_dataset(dataset_path, language_code, split=dev_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
     dataset["test"] = load_dataset(dataset_path, language_code, split=test_split, streaming=streaming).shuffle(seed=0).take(subsample_size)
     
     dataset = dataset.cast_column("audio", Audio(sampling_rate=16000)) # cast all to 16kHz
