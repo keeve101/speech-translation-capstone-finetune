@@ -15,3 +15,5 @@ streamlit
 openai-whisper
 setuptools-rust
 sacrebleu
+ctranslate2
+unbabel-comet

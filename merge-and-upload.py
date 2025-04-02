@@ -1,5 +1,5 @@
 import argparse
-from transformers import WhisperForConditionalGeneration, AutoModelForSeq2SeqLM
+from transformers import WhisperForConditionalGeneration, AutoModelForSeq2SeqLM, AutoTokenizer, WhisperProcessor
 from peft import PeftModel
 from pathlib import Path
 from huggingface_hub import HfApi
@@ -17,8 +17,10 @@ def main():
 
     if args.model == "openai/whisper-large-v3-turbo":
         model = WhisperForConditionalGeneration.from_pretrained(args.model, torch_dtype=torch.float16)
+        processor = WhisperProcessor.from_pretrained(args.model)
     else:
         model = AutoModelForSeq2SeqLM.from_pretrained(args.model, torch_dtype=torch.float16)
+        processor = AutoTokenizer.from_pretrained(args.model)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
@@ -28,12 +30,14 @@ def main():
     merged_model_path = Path(args.adapter_path) / "merged_model"
     merged_model = model_to_merge.merge_and_unload()
     merged_model.save_pretrained(merged_model_path)
+    processor.save_pretrained(merged_model_path)
     
     model_name = args.model_name
 
     repo_id = f"{args.repo_owner}/{model_name}"
 
     merged_model.push_to_hub(repo_id)
+    processor.push_to_hub(repo_id)
 
     if args.convert_to_pt:
         command = [
