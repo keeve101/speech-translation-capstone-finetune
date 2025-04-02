@@ -1,3 +1,4 @@
+import argparse
 from transformers import WhisperForConditionalGeneration
 from peft import PeftModel
 from pathlib import Path
@@ -5,42 +6,42 @@ from huggingface_hub import HfApi
 import torch
 import subprocess
 
-language_code = "th"
-adapter_path = f"./{language_code}_output"
+def main():
+    parser = argparse.ArgumentParser(description="Fine-tune and upload model with LoRA adaptation.")
+    parser.add_argument("--adapter_path", type=str, required=True, help="Path to the adapter checkpoint.")
+    parser.add_argument("--repo_owner", type=str, required=True, help="Hugging Face repo owner.", default="keeve101")
+    parser.add_argument("--model", type=str, choices=["openai/whisper-large-v3-turbo", "facebook/nllb-200-distilled-600M"], default="openai/whisper-large-v3-turbo", help="Model to use for fine-tuning.")
+    parser.add_argument("--convert_to_pt", action="store_true", help="Whether to convert to PT format.")
+    parser.add_argument("--model_name", type=str, help="Custom model name.")
+    args = parser.parse_args()
 
-model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3-turbo", torch_dtype=torch.float16)
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model.to(device)
+    model = WhisperForConditionalGeneration.from_pretrained(args.model, torch_dtype=torch.float16)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
 
-model_to_merge = PeftModel.from_pretrained(model, adapter_path, torch_dtype=torch.float16)
+    # merge with adapter, then upload to hf
+    model_to_merge = PeftModel.from_pretrained(model, args.adapter_path, torch_dtype=torch.float16)
+    merged_model_path = Path(args.adapter_path) / "merged_model"
+    merged_model = model_to_merge.merge_and_unload()
+    merged_model.save_pretrained(merged_model_path)
+    
+    model_name = args.model_name
 
-merged_model_path = Path(adapter_path) / "merged_model"
-merged_model = model_to_merge.merge_and_unload()
-merged_model.save_pretrained(merged_model_path)
+    repo_id = f"{args.repo_owner}/{model_name}"
 
-kwargs = {
-    "dataset_tags": "keeve101/common-voice-unified-splits",
-    "dataset": "Common Voice 10.0/20.0/21.0 (en/zh-CN/th/hi/id/vi) splits",
-    "language": language_code,
-    "model_name": f"Whisper Large v3 Turbo - LoRA {language_code}-finetuned",
-    "finetuned_from": "openai/whisper-large-v3-turbo",
-    "tasks": "automatic-speech-recognition",
-}
+    if args.convert_to_pt:
+        command = [
+            "python", "convert-to-pt.py", "--model_name", repo_id,
+            "--output_dir", str(merged_model_path), "--output_name", model_name
+        ]
+        subprocess.call(command)
 
-model_name = f"whisper-large-v3-turbo-cv-unified-splits-LoRA-finetuned-{language_code}"
+        api = HfApi()
+        api.upload_file(
+            path_or_fileobj=merged_model_path / f"{model_name}.pt",
+            path_in_repo=f"{model_name}.pt",
+            repo_id=repo_id,
+        )
 
-#torch.save(merged_model.state_dict(), merged_model_path / f"{model_name}.pt")
-
-repo_id = f"keeve101/{model_name}"
-#merged_model.push_to_hub(repo_id, **kwargs)
-
-command = ["python", "convert-to-pt.py", "--model_name", f"{repo_id}", "--output_dir", merged_model_path, "--output_name", f"{model_name}"]
-
-subprocess.call(command)
-
-api = HfApi()
-api.upload_file(
-    path_or_fileobj=merged_model_path / f"{model_name}.pt",
-    path_in_repo=f"{model_name}.pt",
-    repo_id=repo_id,
-)
+if __name__ == "__main__":
+    main()
