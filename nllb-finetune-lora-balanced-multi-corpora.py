@@ -122,7 +122,7 @@ model.to(device)
 config_names = get_dataset_config_names(dataset_path)
 config_names = [config_name for config_name in config_names if config_name in LANGUAGES.keys()]
 
-dataset: Dataset = concatenate_datasets([load_dataset(dataset_path, config_name, split="train").filter(lambda x: x["en"] != "" and x["other"] != "") for config_name in config_names])
+dataset: Dataset = concatenate_datasets([load_dataset(dataset_path, config_name, split="train").filter(lambda x: bool(x.get("en")) and bool(x.get("other"))) for config_name in config_names])
 
 train_test_split = dataset.train_test_split(test_size=0.01)
 
@@ -161,11 +161,11 @@ training_args = Seq2SeqTrainingArguments(
     num_train_epochs=1,
     gradient_checkpointing=True,
     fp16=True,
-    evaluation_strategy="steps",
+    evaluation_strategy="no", 
     per_device_eval_batch_size=4,
     predict_with_generate=True,
     save_steps=10000,
-    eval_steps=10000,
+    #eval_steps=10000,
     logging_steps=200,
     report_to=["tensorboard"],
     push_to_hub=False,
@@ -177,9 +177,9 @@ trainer = Seq2SeqTrainer(
     args=training_args,
     model=model,
     train_dataset=train_dataset,
-    eval_dataset=val_dataset,
+    #eval_dataset=val_dataset,
     data_collator=data_collator,
-    compute_metrics=compute_metrics,
+    #compute_metrics=compute_metrics,
     processing_class=tokenizer,
 )
 
@@ -190,3 +190,4 @@ trainer.train(resume_from_checkpoint=checkpoint_path)
 
 model.save_pretrained(output_dir)
 tokenizer.save_pretrained(output_dir)
+
