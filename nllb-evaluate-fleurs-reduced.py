@@ -21,7 +21,7 @@ LANGUAGES = {
    'en': "eng_Latn"
 }
 
-def translate_batch(dataset, tokenizer, translator, normalizer, src_lang, tgt_lang, src_key, tgt_key, batch_size):
+def translate_dataset(dataset, tokenizer, translator, normalizer, src_lang, tgt_lang, src_key, tgt_key, batch_size):
     tokenizer.src_lang = src_lang
     
     def group_batch(batch):
@@ -37,17 +37,14 @@ def translate_batch(dataset, tokenizer, translator, normalizer, src_lang, tgt_la
     cer_scores = []
     bleu_scores = []
 
-    print(f"Processing translation: {src_lang} -> {tgt_lang}")  # Status message
+    print(f"Processing translation: {src_lang} -> {tgt_lang}")
     
     for batch in tqdm(batched_dataset, total=len(batched_dataset), desc="Translating", unit="batch"):
         src_batch = [tokenizer.convert_ids_to_tokens(tokenizer.encode(x)) for x in batch[src_key]]
-        
         tgt_prefix = [[tgt_lang]] * len(src_batch)
-        
         translated_batch = translator.translate_batch(src_batch, target_prefix=tgt_prefix)
-        
         predictions = [tokenizer.decode(tokenizer.convert_tokens_to_ids(x.hypotheses[0][1:])) for x in translated_batch]
-
+        
         predictions = [normalizer(pred) for pred in predictions]
         references = [normalizer(ref) for ref in batch[tgt_key]]
         
@@ -61,19 +58,39 @@ def translate_batch(dataset, tokenizer, translator, normalizer, src_lang, tgt_la
         "BLEU": sum([b["score"] for b in bleu_scores]) / len(bleu_scores)
     }
 
+def evaluate_on_fleurs(translator, tokenizer, normalizer, batch_size=64):
+    dataset_path = "keeve101/fleurs-reduced"
+    config_names = get_dataset_config_names(dataset_path)
+    dataset_dicts = {config: load_dataset(dataset_path, config, split="train") for config in config_names}
+    
+    results = {}
+    
+    for config, dataset in dataset_dicts.items():
+        src_key = "en_transcription"
+        tgt_key = f"{config}_transcription"
+        src_lang = LANGUAGES['en']
+        tgt_lang = LANGUAGES[config]
+        
+        results[f"{src_lang} -> {tgt_lang}"] = translate_dataset(dataset, tokenizer, translator, normalizer, src_lang, tgt_lang, src_key, tgt_key, batch_size)
+        
+        src_key, tgt_key = tgt_key, src_key
+        src_lang, tgt_lang = tgt_lang, src_lang
+        
+        results[f"{src_lang} -> {tgt_lang}"] = translate_dataset(dataset, tokenizer, translator, normalizer, src_lang, tgt_lang, src_key, tgt_key, batch_size)
+    
+    return results
+
 def main():
     parser = argparse.ArgumentParser(description="Convert and use a CTranslate2 model for translation.")
     parser.add_argument("--model_path", type=str, help="Path to the model directory. If omitted, uses the default Facebook model.")
     args = parser.parse_args()
 
     model_path = args.model_path if args.model_path else "facebook/nllb-200-distilled-600M"
-    model_name = os.path.basename(model_path)  # Take as output directory
-    
+    model_name = os.path.basename(model_path)
     output_path = "ctranslate2-models/" + model_name
 
     if not os.path.isdir(output_path):
         command = ["ct2-transformers-converter", "--model", model_path, "--output_dir", output_path]
-        
         subprocess.call(command)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -81,29 +98,7 @@ def main():
     tokenizer = transformers.AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
     normalizer = BasicTextNormalizer()
     
-    dataset_path = "keeve101/fleurs-reduced"
-    config_names = get_dataset_config_names(dataset_path)
-    dataset_dicts = {config: load_dataset(dataset_path, config, split="train") for config in config_names}
-    
-    batch_size = 64
-    
-    results = {}
-    
-    for config, dataset in dataset_dicts.items():
-        # run en --> other first, then other --> en
-        src_key = "en_transcription"
-        tgt_key = f"{config}_transcription"
-        
-        src_lang = LANGUAGES['en']
-        tgt_lang = LANGUAGES[config]
-        
-        results[f"{src_lang} -> {tgt_lang}"] = translate_batch(dataset, tokenizer, translator, normalizer, src_lang, tgt_lang, src_key, tgt_key, batch_size)
-        
-        src_key, tgt_key = tgt_key, src_key
-        src_lang, tgt_lang = tgt_lang, src_lang
-
-        results[f"{src_lang} -> {tgt_lang}"] = translate_batch(dataset, tokenizer, translator, normalizer, src_lang, tgt_lang, src_key, tgt_key, batch_size)
-        
+    results = evaluate_on_fleurs(translator, tokenizer, normalizer)
     
     for direction, scores in results.items():
         print(f"Results for {direction}:")
