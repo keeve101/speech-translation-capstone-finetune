@@ -52,6 +52,8 @@ LANGUAGES = {
     "id": "indonesian",
     "th": "thai",
     "vi": "vietnamese",
+    "ms": "malay",
+    "tl": "tagalog",
 }
 
 def take_dataset(dataset_path, language_code, split_percentage="", streaming=False, subsample_size=500, combine_train_val=False):

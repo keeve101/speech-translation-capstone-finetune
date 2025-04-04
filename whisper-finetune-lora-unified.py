@@ -3,22 +3,33 @@ import evaluate
 
 from transformers import WhisperProcessor, WhisperForConditionalGeneration, Seq2SeqTrainingArguments, Seq2SeqTrainer
 from transformers.trainer_utils import get_last_checkpoint
-from datasets import concatenate_datasets 
+from datasets import concatenate_datasets, get_dataset_config_names, load_dataset, Audio
 from peft import LoraConfig, get_peft_model
 from whisper_lib import LANGUAGES, DataCollatorSpeechSeq2SeqWithPadding, take_dataset, prepare_dataset
 from torch.utils.data import WeightedRandomSampler
-
 from typing import Optional
 
 language_codes = [key for key in LANGUAGES.keys()]
 
-dataset_path = "keeve101/common-voice-unified-splits"
+cv_unified_dataset_path = "keeve101/common-voice-unified-splits"
+magic_hub_ms_tl_dataset_path = "keeve101/magic-hub-ms-tl-datasets"
 
 processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3-turbo", task="transcribe", predict_timestamps=False)
 
 combine_train_val = True # whether to combine train and validation into one dataset
 
-dataset_dicts = {key: take_dataset(dataset_path, key, split_percentage="", streaming=False, subsample_size=500, combine_train_val=combine_train_val) for key in language_codes}
+cv_unified_dataset_config_names = get_dataset_config_names(cv_unified_dataset_path)
+magic_hub_ms_tl_dataset_config_names = get_dataset_config_names(magic_hub_ms_tl_dataset_path)
+
+dataset_dicts = {
+    config: take_dataset(cv_unified_dataset_path, config, split_percentage="", streaming=False, subsample_size=500, combine_train_val=combine_train_val) for config in cv_unified_dataset_config_names
+}
+
+dataset_dicts.update({
+    config: load_dataset(magic_hub_ms_tl_dataset_path, config).cast_column("audio", Audio(sampling_rate=16000)) for config in magic_hub_ms_tl_dataset_config_names
+})
+
+assert set(cv_unified_dataset_config_names) | set(magic_hub_ms_tl_dataset_config_names) == set(language_codes) # sanity check
 
 dataset_train_subsets = []
 
@@ -140,15 +151,15 @@ training_args = Seq2SeqTrainingArguments(
     gradient_accumulation_steps=2,
     learning_rate=1e-5,
     warmup_steps=500,
-    max_steps=6800,
+    max_steps=7000,
     gradient_checkpointing=True,
     fp16=True,
     evaluation_strategy="steps",
     per_device_eval_batch_size=1,
     predict_with_generate=True,
     generation_max_length=225,
-    save_steps=400,
-    eval_steps=400,
+    save_steps=1000,
+    eval_steps=1000,
     logging_steps=100,
     report_to=["tensorboard"],
     #load_best_model_at_end=True,
@@ -178,4 +189,3 @@ trainer.train(resume_from_checkpoint=checkpoint_path)
 # Save after training is done
 model.save_pretrained(output_dir)
 processor.save_pretrained(output_dir)
-
