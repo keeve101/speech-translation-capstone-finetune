@@ -1,5 +1,5 @@
 import os
-os.environ["HF_HOME"] = "/workspace/.cache"
+os.environ["HF_HOME"] = "/tworkspace/.cache"
 
 import torch
 import evaluate
@@ -133,7 +133,7 @@ def compute_metrics(pred, do_normalize_eval=True):
 
 eval_dataset = {key: dataset_dicts[key]["test"] for key in language_codes}
 
-output_dir = "workspace/output-unified-weighted-random-sampler"
+output_dir = "/workspace/output-unified-weighted-random-sampler"
 
 class Seq2SeqTrainerWithWeightedRandomSampler(Seq2SeqTrainer):
     def __init__(self, *args, sample_weights=None, **kwargs):
@@ -153,16 +153,16 @@ training_args = Seq2SeqTrainingArguments(
     per_device_train_batch_size=64,
     gradient_accumulation_steps=2,
     learning_rate=1e-5,
-    warmup_steps=500,
-    max_steps=9000,
+    warmup_steps=200,
+    num_train_epochs=2,
     gradient_checkpointing=True,
     fp16=True,
     evaluation_strategy="steps",
     per_device_eval_batch_size=32,
     predict_with_generate=True,
     generation_max_length=225,
-    save_steps=1500,
-    eval_steps=1500,
+    save_steps=150,
+    eval_steps=150,
     logging_steps=100,
     report_to=["tensorboard"],
     #load_best_model_at_end=True,
