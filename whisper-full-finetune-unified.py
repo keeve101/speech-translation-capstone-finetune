@@ -1,3 +1,6 @@
+import os
+os.environ["HF_HOME"] = "/workspace/.cache"
+
 import torch
 import evaluate
 
