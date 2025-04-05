@@ -141,8 +141,8 @@ training_args = Seq2SeqTrainingArguments(
     per_device_eval_batch_size=16,
     predict_with_generate=True,
     generation_max_length=225,
-    save_steps=200,
-    eval_steps=200,
+    save_steps=300,
+    eval_steps=300,
     logging_steps=100,
     report_to=["tensorboard"],
     #load_best_model_at_end=True,
@@ -151,6 +151,7 @@ training_args = Seq2SeqTrainingArguments(
     push_to_hub=False,
     remove_unused_columns=False,
     label_names=["labels"],
+    save_safetensors=False
 )
 
 trainer = Seq2SeqTrainerWithWeightedRandomSampler(
