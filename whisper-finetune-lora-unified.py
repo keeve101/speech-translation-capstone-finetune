@@ -150,10 +150,10 @@ class Seq2SeqTrainerWithWeightedRandomSampler(Seq2SeqTrainer):
 
 training_args = Seq2SeqTrainingArguments(
     output_dir=output_dir,  # Set per-language checkpoint directory
-    per_device_train_batch_size=32,
+    per_device_train_batch_size=16,
     gradient_accumulation_steps=2,
     learning_rate=1e-5,
-    warmup_steps=200,
+    warmup_steps=400,
     num_train_epochs=2,
     gradient_checkpointing=True,
     fp16=True,
