@@ -1,5 +1,5 @@
 import os
-os.environ["HF_HOME"] = "/tworkspace/.cache"
+os.environ["HF_HOME"] = "/workspace/.cache"
 
 import torch
 import evaluate
@@ -150,7 +150,7 @@ class Seq2SeqTrainerWithWeightedRandomSampler(Seq2SeqTrainer):
 
 training_args = Seq2SeqTrainingArguments(
     output_dir=output_dir,  # Set per-language checkpoint directory
-    per_device_train_batch_size=64,
+    per_device_train_batch_size=32,
     gradient_accumulation_steps=2,
     learning_rate=1e-5,
     warmup_steps=200,
@@ -158,11 +158,11 @@ training_args = Seq2SeqTrainingArguments(
     gradient_checkpointing=True,
     fp16=True,
     evaluation_strategy="steps",
-    per_device_eval_batch_size=32,
+    per_device_eval_batch_size=16,
     predict_with_generate=True,
     generation_max_length=225,
-    save_steps=150,
-    eval_steps=150,
+    save_steps=200,
+    eval_steps=200,
     logging_steps=100,
     report_to=["tensorboard"],
     #load_best_model_at_end=True,
