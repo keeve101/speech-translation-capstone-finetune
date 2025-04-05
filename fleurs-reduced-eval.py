@@ -2,19 +2,13 @@ import os
 os.environ["HF_HOME"] = "/workspace/.cache"
 
 import evaluate
+import json
 
 from datasets import load_dataset, Audio, get_dataset_config_names
 from transformers import WhisperProcessor, WhisperForConditionalGeneration, Seq2SeqTrainingArguments, Seq2SeqTrainer
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
-
+from pprint import pprint
 from whisper_lib import DataCollatorSpeechSeq2SeqWithPadding
-
-
-model = WhisperForConditionalGeneration.from_pretrained("/workspace/output-unified-weighted-random-sampler-full-finetune/checkpoint-3692")
-
-model.config.forced_decoder_ids = None
-model.config.suppress_tokens = []
-model.config.use_cache = False
 
 processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3-turbo", task="transcribe", predict_timestamps=False)
 
@@ -112,6 +106,8 @@ training_args = Seq2SeqTrainingArguments(
     label_names=["labels"],  # same reason as above
 )
 model_pre = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3-turbo")
+model_pre.config.forced_decoder_ids = None
+model_pre.config.suppress_tokens = []
 
 trainer_pre = Seq2SeqTrainer(
     args=training_args,
@@ -124,17 +120,34 @@ trainer_pre = Seq2SeqTrainer(
     # callbacks=[ShuffleCallback()],
 )
 
-print(trainer_pre.evaluate(vectorized_datasets_dict))
+results_dir = {}
 
-trainer_post = Seq2SeqTrainer(
-    args=training_args,
-    model=model,
-    train_dataset=vectorized_datasets_dict["zh-CN"],
-    eval_dataset=vectorized_datasets_dict,
-    data_collator=data_collator,
-    compute_metrics=compute_metrics,
-    processing_class=processor,
-    # callbacks=[ShuffleCallback()],
-)
+base_results = trainer_pre.evaluate(vectorized_datasets_dict)
+pprint(base_results)
 
-print(trainer_post.evaluate(vectorized_datasets_dict, metric_key_prefix="post"))
+results_dir["base"] = base_results
+
+for directory in os.listdir("/workspace/output-unified-weighted-random-sampler-full-finetune"):
+    if "checkpoint" in directory:
+        model = WhisperForConditionalGeneration.from_pretrained(f"/workspace/output-unified-weighted-random-sampler-full-finetune/{directory}")
+        model.config.forced_decoder_ids = None
+        model.config.suppress_tokens = []
+        trainer_post = Seq2SeqTrainer(
+            args=training_args,
+            model=model,
+            train_dataset=vectorized_datasets_dict["zh-CN"],
+            eval_dataset=vectorized_datasets_dict,
+            data_collator=data_collator,
+            compute_metrics=compute_metrics,
+            processing_class=processor,
+            # callbacks=[ShuffleCallback()],
+        )
+
+        results = trainer_post.evaluate(vectorized_datasets_dict)
+        pprint(results)
+
+        results_dir[directory] = results
+        
+# export results_dir
+with open(os.getcwd() + "/results.json", "w") as f:
+    json.dump(results_dir, f, indent=4)
