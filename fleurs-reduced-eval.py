@@ -1,10 +1,13 @@
+import os
+os.environ["HF_HOME"] = "/workspace/.cache"
+
 import evaluate
 
-from datasets import load_dataset, Audio 
+from datasets import load_dataset, Audio, get_dataset_config_names
 from transformers import WhisperProcessor, WhisperForConditionalGeneration, Seq2SeqTrainingArguments, Seq2SeqTrainer
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
 
-from whisper_lib import LANGUAGES, DataCollatorSpeechSeq2SeqWithPadding
+from whisper_lib import DataCollatorSpeechSeq2SeqWithPadding
 
 
 model = WhisperForConditionalGeneration.from_pretrained("/workspace/output-unified-weighted-random-sampler-full-finetune/checkpoint-3692")
@@ -46,7 +49,9 @@ def prepare_dataset(batch, language_code, do_lower_case=True, do_remove_punctuat
 
 fleurs_reduced_dataset_path = "keeve101/fleurs-reduced"
 
-datasets_dict = {language_code: load_dataset(fleurs_reduced_dataset_path, language_code).cast_column(f"{language_code}_audio", Audio(sampling_rate=16000)) for language_code in LANGUAGES.keys()}
+configs = get_dataset_config_names(fleurs_reduced_dataset_path)
+
+datasets_dict = {language_code: load_dataset(fleurs_reduced_dataset_path, language_code).cast_column(f"{language_code}_audio", Audio(sampling_rate=16000)) for language_code in configs}
 
 def compute_metrics(pred, do_normalize_eval=True):
     pred_ids = pred.predictions
@@ -74,7 +79,7 @@ def compute_metrics(pred, do_normalize_eval=True):
     return {"wer": wer, "cer": cer, "sacrebleu": bleu_score}
 
 
-vectorized_datasets_dict = {key: dataset.map(prepare_dataset, remove_columns=list(next(iter(dataset.values())).features)).with_format("torch") for key, dataset in datasets_dict.items()}
+vectorized_datasets_dict = {key: dataset.map(prepare_dataset, remove_columns=list(next(iter(dataset.values())).features), fn_kwargs={"language_code": key, "do_lower_case": True, "do_remove_punctuation": True}).with_format("torch") for key, dataset in datasets_dict.items()}
 
 wer_metric = evaluate.load("wer")
 cer_metric = evaluate.load("cer")
@@ -111,7 +116,7 @@ model_pre = WhisperForConditionalGeneration.from_pretrained("openai/whisper-larg
 trainer_pre = Seq2SeqTrainer(
     args=training_args,
     model=model_pre,
-    train_dataset=vectorized_datasets_dict["en"],
+    train_dataset=vectorized_datasets_dict["zh-CN"],
     eval_dataset=vectorized_datasets_dict,
     data_collator=data_collator,
     compute_metrics=compute_metrics,
@@ -124,7 +129,7 @@ print(trainer_pre.evaluate(vectorized_datasets_dict))
 trainer_post = Seq2SeqTrainer(
     args=training_args,
     model=model,
-    train_dataset=vectorized_datasets_dict["en"],
+    train_dataset=vectorized_datasets_dict["zh-CN"],
     eval_dataset=vectorized_datasets_dict,
     data_collator=data_collator,
     compute_metrics=compute_metrics,
