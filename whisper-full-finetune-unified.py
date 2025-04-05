@@ -113,7 +113,7 @@ def compute_metrics(pred, do_normalize_eval=True):
 
 eval_dataset = {key: dataset_dicts[key]["test"] for key in language_codes}
 
-output_dir = "/workspace/output-unified-weighted-random-sampler-full-finetune"
+output_dir = "/workspace/output-unified-weighted-random-sampler-full-finetune-v2"
 
 class Seq2SeqTrainerWithWeightedRandomSampler(Seq2SeqTrainer):
     def __init__(self, *args, sample_weights=None, **kwargs):
@@ -130,15 +130,15 @@ class Seq2SeqTrainerWithWeightedRandomSampler(Seq2SeqTrainer):
 
 training_args = Seq2SeqTrainingArguments(
     output_dir=output_dir,  # Set per-language checkpoint directory
-    per_device_train_batch_size=32,
+    per_device_train_batch_size=64,
     gradient_accumulation_steps=1,
-    learning_rate=1e-5,
-    warmup_steps=200,
+    learning_rate=1.25e-6,
+    warmup_steps=300,
     num_train_epochs=2,
     gradient_checkpointing=True,
     fp16=True,
     evaluation_strategy="steps",
-    per_device_eval_batch_size=16,
+    per_device_eval_batch_size=32,
     predict_with_generate=True,
     generation_max_length=225,
     save_steps=300,
