@@ -1,6 +1,3 @@
-import os
-os.environ["HF_HOME"] = "/workspace/.cache"
-
 import torch
 import evaluate
 
@@ -113,7 +110,7 @@ def compute_metrics(pred, do_normalize_eval=True):
 
 eval_dataset = {key: dataset_dicts[key]["test"] for key in language_codes}
 
-output_dir = "./output-unified-weighted-random-sampler"
+output_dir = "workspace/output-unified-weighted-random-sampler-full-finetune"
 
 class Seq2SeqTrainerWithWeightedRandomSampler(Seq2SeqTrainer):
     def __init__(self, *args, sample_weights=None, **kwargs):
