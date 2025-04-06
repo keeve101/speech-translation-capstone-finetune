@@ -7,7 +7,6 @@ import evaluate
 from transformers import WhisperProcessor, WhisperForConditionalGeneration, Seq2SeqTrainingArguments, Seq2SeqTrainer
 from transformers.trainer_utils import get_last_checkpoint
 from datasets import concatenate_datasets, get_dataset_config_names, load_dataset, Audio
-from peft import LoraConfig, get_peft_model
 from whisper_lib import LANGUAGES, DataCollatorSpeechSeq2SeqWithPadding, take_dataset, prepare_dataset
 from torch.utils.data import WeightedRandomSampler
 from typing import Optional
@@ -75,28 +74,9 @@ model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3
 
 model.config.forced_decoder_ids = None
 model.config.suppress_tokens = []
-model.config.use_cache = False
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model.to(device)
-
-lora_config = LoraConfig(
-    r=32,
-    lora_alpha=64,
-    target_modules=["q_proj", "v_proj"],
-    lora_dropout=0.05,
-    bias="none",
-)
-
-# model.enable_input_require_grads()
-def make_inputs_require_grad(module, input, output):
-    output.requires_grad_(True)
-
-model.model.encoder.conv1.register_forward_hook(make_inputs_require_grad)
-
-model.gradient_checkpointing_enable({"use_reentrant": False})
-
-model = get_peft_model(model, lora_config)
 
 """
 Model  | Batch Size | Gradient Accumulation | Learning Rate
@@ -133,7 +113,7 @@ def compute_metrics(pred, do_normalize_eval=True):
 
 eval_dataset = {key: dataset_dicts[key]["test"] for key in language_codes}
 
-output_dir = "/workspace/output-unified-weighted-random-sampler"
+output_dir = "/workspace/output-unified-weighted-random-sampler-full-finetune-v2"
 
 class Seq2SeqTrainerWithWeightedRandomSampler(Seq2SeqTrainer):
     def __init__(self, *args, sample_weights=None, **kwargs):
@@ -150,19 +130,19 @@ class Seq2SeqTrainerWithWeightedRandomSampler(Seq2SeqTrainer):
 
 training_args = Seq2SeqTrainingArguments(
     output_dir=output_dir,  # Set per-language checkpoint directory
-    per_device_train_batch_size=16,
-    gradient_accumulation_steps=2,
-    learning_rate=1e-5,
-    warmup_steps=400,
+    per_device_train_batch_size=64,
+    gradient_accumulation_steps=1,
+    learning_rate=1.25e-6,
+    warmup_steps=300,
     num_train_epochs=2,
     gradient_checkpointing=True,
     fp16=True,
     evaluation_strategy="steps",
-    per_device_eval_batch_size=16,
+    per_device_eval_batch_size=32,
     predict_with_generate=True,
     generation_max_length=225,
-    save_steps=200,
-    eval_steps=200,
+    save_steps=300,
+    eval_steps=300,
     logging_steps=100,
     report_to=["tensorboard"],
     #load_best_model_at_end=True,
@@ -171,6 +151,7 @@ training_args = Seq2SeqTrainingArguments(
     push_to_hub=False,
     remove_unused_columns=False,
     label_names=["labels"],
+    save_safetensors=False
 )
 
 trainer = Seq2SeqTrainerWithWeightedRandomSampler(
