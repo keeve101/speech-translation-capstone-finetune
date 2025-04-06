@@ -83,12 +83,13 @@ def main():
         
         wer = 100 * wer_metric.compute(predictions=predictions, references=references)
         cer = 100 * cer_metric.compute(predictions=predictions, references=references)
-        bleu = bleu_metric.compute(predictions=predictions, references=[[ref] for ref in references])
+        bleu = bleu_metric.compute(predictions=predictions, references=[[ref] for ref in references], tokenize="intl")
+        bleu_score = bleu["score"]
         
         results[language_code] = {
             "wer": wer,
             "cer": cer,
-            "sacrebleu": bleu
+            "sacrebleu": bleu_score
         }
     
     file_path = os.path.join(os.getcwd(), f"{model_name}-fleurs-reduced-eval-results.json")
