@@ -20,3 +20,4 @@ unbabel-comet
 matplotlib
 zhconv
 faster-whisper
+whisperx

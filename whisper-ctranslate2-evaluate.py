@@ -3,7 +3,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 import argparse
 import subprocess
-from faster_whisper import WhisperModel
+import whisperx
 
 def convert_to_ct2(model_path, output_dir):
     print(f"Converting model '{model_path}' to CTranslate2 format...")
@@ -33,10 +33,11 @@ def main():
         convert_to_ct2(model_path, output_dir)
 
     print(f"Loading model from {output_dir} on {args.device} ({args.compute_type})...")
-    model = WhisperModel(output_dir, device=args.device, compute_type=args.compute_type)
+    model = whisperx.load_model(output_dir, device=args.device, compute_type=args.compute_type)
 
     print(f"\nTranscribing: {args.audio}")
-    segments, info = model.transcribe(args.audio, beam_size=5)
+    batch_size = 8
+    segments, info = model.transcribe(args.audio, batch_size=batch_size)
 
     print(f"\nDetected language: '{info.language}' (probability {info.language_probability:.2f})\n")
     for segment in segments:
