@@ -4,6 +4,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 import argparse
 import subprocess
 import evaluate
+import json
 from faster_whisper import WhisperModel
 from datasets import load_dataset, Audio, get_dataset_config_names
 from zhconv import zhconv
@@ -89,6 +90,12 @@ def main():
             "cer": cer,
             "sacrebleu": bleu
         }
+    
+    file_path = os.path.join(os.getcwd(), f"{model_name}-fleurs-reduced-eval-results.json")
+    
+    with open(file_path, "w") as f:
+        json.dump(results, f, indent=4)
+    print(f"\nResults exported to {file_path}")
 
 if __name__ == "__main__":
     main()
