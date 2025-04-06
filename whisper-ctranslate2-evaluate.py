@@ -19,7 +19,7 @@ def convert_to_ct2(model_path, output_dir):
 
 def main():
     parser = argparse.ArgumentParser(description="Convert and transcribe with Whisper via CTranslate2 backend.")
-    parser.add_argument("--model_path", type=str, default="openai/whisper-large-v3", help="Model path or HF repo (default: openai/whisper-large-v3)")
+    parser.add_argument("--model_path", type=str, default="openai/whisper-large-v3-turbo", help="Path to Whisper model")
     parser.add_argument("--audio", type=str, required=True, help="Path to audio file (e.g., mp3 or wav)")
     parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda", help="Device to run model on")
     parser.add_argument("--compute_type", type=str, choices=["float16", "int8", "int8_float16"], default="float16", help="Precision mode for inference")
