@@ -171,4 +171,5 @@ for lang_code, dataset in vectorized_datasets_dict.items():
         pprint(metrics)
 
 with open(output_file_path, "w") as f:
+    results = {f"{k[0]}-{k[1]}": v for k, v in results.items()}
     json.dump(results, f, indent=4)
