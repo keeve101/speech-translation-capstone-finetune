@@ -1,14 +1,14 @@
-import os
-import argparse
-import transformers
-import ctranslate2
-import subprocess
-import evaluate
 import torch
-
+import evaluate
+import json
+import zhconv
+import argparse
 from tqdm import tqdm
-from transformers.models.whisper.english_normalizer import BasicTextNormalizer
+from torch.utils.data import DataLoader
 from datasets import load_dataset, get_dataset_config_names
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, DataCollatorForSeq2Seq
+from transformers.models.whisper.english_normalizer import BasicTextNormalizer
+from pprint import pprint
 
 LANGUAGES = {
    'hi': "hin_Deva", 
@@ -21,90 +21,143 @@ LANGUAGES = {
    'en': "eng_Latn"
 }
 
-def translate_dataset(dataset, tokenizer, translator, normalizer, src_lang, tgt_lang, src_key, tgt_key, batch_size):
-    tokenizer.src_lang = src_lang
-    
-    def group_batch(batch):
-        return {k: [v] for k, v in batch.items()}
+LANGUAGES_INVERSE = {k: v for v, k in LANGUAGES.items()}
 
-    batched_dataset = dataset.map(group_batch, batched=True, batch_size=batch_size)
-    
-    wer_metric = evaluate.load("wer")
-    cer_metric = evaluate.load("cer")
-    bleu_metric = evaluate.load("sacrebleu")
-    
-    wer_scores = []
-    cer_scores = []
-    bleu_scores = []
+# Command-line argument parsing
+parser = argparse.ArgumentParser(description="Transcribe text using NLLB model.")
+parser.add_argument(
+    '--model_name', type=str, required=True,
+    help="The Hugging Face model name or path for the NLLB model"
+)
+args = parser.parse_args()
 
-    print(f"Processing translation: {src_lang} -> {tgt_lang}")
+model_name = args.model_name
+base_model_name = model_name.split("/")[-1]
+
+output_file_path = base_model_name + "-eval.json"
+
+wer_metric = evaluate.load("wer")
+cer_metric = evaluate.load("cer")
+bleu_metric = evaluate.load("sacrebleu")
+
+# Use NLLB tokenizer and model instead of Whisper
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+data_collator = DataCollatorForSeq2Seq(tokenizer)
+normalizer = BasicTextNormalizer()
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model.to(device)
+
+def normalize_zh(text):
+    text = insert_spaces_between_characters(text)
+    text = zhconv.convert(text, "zh-cn")  # convert to simplified chinese
+    return text
+
+def insert_spaces_between_characters(text):
+    space_removed = "".join([t.strip() for t in text.split()])
+    return " ".join(space_removed)
+
+def prepare_dataset(batch, language_code, do_lower_case=True, do_remove_punctuation=True, max_length=1024):
+    en_transcription = batch["en_transcription"]
+    other_transcription = batch[f"{language_code}_transcription"]
+
+    if do_lower_case:
+        en_transcription = en_transcription.lower()
+        other_transcription = other_transcription.lower()
+    if do_remove_punctuation:
+        en_transcription = normalizer(en_transcription).strip()
+        other_transcription = normalizer(other_transcription).strip()
     
-    for batch in tqdm(batched_dataset, total=len(batched_dataset), desc="Translating", unit="batch"):
-        src_batch = [tokenizer.convert_ids_to_tokens(tokenizer.encode(x)) for x in batch[src_key]]
-        tgt_prefix = [[tgt_lang]] * len(src_batch)
-        translated_batch = translator.translate_batch(src_batch, target_prefix=tgt_prefix)
-        predictions = [tokenizer.decode(tokenizer.convert_tokens_to_ids(x.hypotheses[0][1:])) for x in translated_batch]
+    tokenizer.src_lang = LANGUAGES['en']
+    batch["en_labels"] = tokenizer(en_transcription, padding=True, truncation=True, max_length=max_length).input_ids
+    
+    tokenizer.src_lang = LANGUAGES[other_transcription]
+    batch[f"{language_code}_labels"] = tokenizer(other_transcription, padding=True, truncation=True, max_length=max_length).input_ids
+
+    return batch
+
+fleurs_reduced_dataset_path = "keeve101/fleurs-reduced"
+
+# Loading datasets
+configs = get_dataset_config_names(fleurs_reduced_dataset_path)
+datasets_dict = {language_code: load_dataset(fleurs_reduced_dataset_path, language_code) for language_code in configs}
+
+vectorized_datasets_dict = {key: dataset.map(prepare_dataset, remove_columns=list(next(iter(dataset.values())).features), fn_kwargs={"language_code": key, "do_lower_case": True, "do_remove_punctuation": True}).with_format("torch") for key, dataset in datasets_dict.items()}
+
+def decode_preds_and_labels(pred_ids, label_ids, lang_code, do_normalize_eval=True):
+    # replace -100 with the pad_token_id
+    label_ids[label_ids == -100] = tokenizer.pad_token_id
+
+    # we do not want to group tokens when computing the metrics
+    preds = tokenizer.batch_decode(pred_ids, skip_special_tokens=True, basic_normalize=do_normalize_eval)
+    labels = tokenizer.batch_decode(label_ids, skip_special_tokens=True, basic_normalize=do_normalize_eval)
+
+    if do_normalize_eval:
+        preds = [normalizer(pred) for pred in preds]
+        labels = [normalizer(label) for label in labels]
+        # filtering step to only evaluate the samples that correspond to non-zero references:
+        preds = [preds[i] for i in range(len(preds)) if len(labels[i]) > 0]
+        labels = [labels[i] for i in range(len(labels)) if len(labels[i]) > 0]
+    
+    if lang_code == 'zh-CN':
+        preds = [normalize_zh(pred) for pred in preds]
+        labels = [normalize_zh(label) for label in labels]
+    elif lang_code == "th":
+        preds = [insert_spaces_between_characters(pred) for pred in preds]
+        labels = [insert_spaces_between_characters(label) for label in labels]
+    
+    return preds, labels
+
+def compute_metrics(preds, labels):
+    wer = 100 * wer_metric.compute(predictions=preds, references=labels)
+    cer = 100 * cer_metric.compute(predictions=preds, references=labels)
+    bleu = bleu_metric.compute(predictions=preds, references=labels, tokenize="intl") 
+    bleu_score = bleu["score"]
+
+    return {"wer": wer, "cer": cer, "sacrebleu": bleu_score}
+
+results = {}
+
+for lang_code, dataset in vectorized_datasets_dict.items():
+    print(f"\nTranscribing for {lang_code}")
+    
+    dataloader = DataLoader(dataset["train"], batch_size=1, collate_fn=data_collator)
+    all_preds = {}
+    all_labels = {}
+    for inputs in tqdm(dataloader, desc=f"{lang_code}", unit="batch", total=len(dataloader)):
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        """
+        inputs = {
+            "en_transcription": .input_ids,
+            "other_transcription": ....
+        }
+        """
         
-        predictions = [normalizer(pred) for pred in predictions]
-        references = [normalizer(ref) for ref in batch[tgt_key]]
+        src_lang = "en"
+        tgt_lang = lang_code
+
+        pred_ids = model.generate(
+            input_features=inputs[f"{src_lang}_transcription"],
+            forced_bos_token_id=tokenizer.convert_tokens_to_ids(LANGUAGES[tgt_lang]),
+            max_new_tokens=int(16 + 1.5 * inputs[f"{lang_code}_transcription"].shape[1]),
+        )
         
-        wer_scores.append(wer_metric.compute(predictions=predictions, references=references))
-        cer_scores.append(cer_metric.compute(predictions=predictions, references=references))
-        bleu_scores.append(bleu_metric.compute(predictions=predictions, references=[[r] for r in references], tokenize="intl"))
-        
-    return {
-        "WER": sum(wer_scores) / len(wer_scores) * 100,
-        "CER": sum(cer_scores) / len(cer_scores) * 100,
-        "BLEU": sum([b["score"] for b in bleu_scores]) / len(bleu_scores)
-    }
+        input_ids = inputs[f"{tgt_lang}_transcription"]
 
-def evaluate_on_fleurs(translator, tokenizer, normalizer, batch_size=64):
-    dataset_path = "keeve101/fleurs-reduced"
-    config_names = get_dataset_config_names(dataset_path)
-    dataset_dicts = {config: load_dataset(dataset_path, config, split="train") for config in config_names}
+        preds, labels = decode_preds_and_labels(pred_ids, input_ids, lang_code=tgt_lang)
+
+        all_preds.setdefault((src_lang, tgt_lang), [])
+        all_preds[(src_lang, tgt_lang)].extend(preds)
+
+        all_labels.setdefault((src_lang, tgt_lang), [])
+        all_labels[(src_lang, tgt_lang)].extend(labels)
     
-    results = {}
-    
-    for config, dataset in dataset_dicts.items():
-        src_key = "en_transcription"
-        tgt_key = f"{config}_transcription"
-        src_lang = LANGUAGES['en']
-        tgt_lang = LANGUAGES[config]
-        
-        results[f"{src_lang} -> {tgt_lang}"] = translate_dataset(dataset, tokenizer, translator, normalizer, src_lang, tgt_lang, src_key, tgt_key, batch_size)
-        
-        src_key, tgt_key = tgt_key, src_key
-        src_lang, tgt_lang = tgt_lang, src_lang
-        
-        results[f"{src_lang} -> {tgt_lang}"] = translate_dataset(dataset, tokenizer, translator, normalizer, src_lang, tgt_lang, src_key, tgt_key, batch_size)
-    
-    return results
+    for direction, (preds, labels) in all_preds.items():
+        metrics = compute_metrics(preds, labels)
+        results[direction] = metrics
+        print(direction)
+        pprint(metrics)
 
-def main():
-    parser = argparse.ArgumentParser(description="Convert and use a CTranslate2 model for translation.")
-    parser.add_argument("--model_path", type=str, help="Path to the model directory. If omitted, uses the default Facebook model.")
-    args = parser.parse_args()
-
-    model_path = args.model_path if args.model_path else "facebook/nllb-200-distilled-600M"
-    model_name = os.path.basename(model_path)
-    output_path = "ctranslate2-models/" + model_name
-
-    if not os.path.isdir(output_path):
-        command = ["ct2-transformers-converter", "--model", model_path, "--output_dir", output_path]
-        subprocess.call(command)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    translator = ctranslate2.Translator(output_path, device=device)
-    tokenizer = transformers.AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
-    normalizer = BasicTextNormalizer()
-    
-    results = evaluate_on_fleurs(translator, tokenizer, normalizer)
-    
-    for direction, scores in results.items():
-        print(f"Results for {direction}:")
-        print(f"  WER: {scores['WER']:.4f}")
-        print(f"  CER: {scores['CER']:.4f}")
-        print(f"  BLEU: {scores['BLEU']:.4f}")
-
-if __name__ == "__main__":
-    main()
+with open(output_file_path, "w") as f:
+    json.dump(results, f, indent=4)
