@@ -71,7 +71,7 @@ def prepare_dataset(batch, language_code, do_lower_case=True, do_remove_punctuat
     batch["labels"] = processor.tokenizer(transcription).input_ids
     return batch
 
-fleurs_reduced_dataset_path = "keeve101/fleurs-reduced" + "-with-whisper-predictions"
+fleurs_reduced_dataset_path = "keeve101/fleurs-reduced"
 
 configs = get_dataset_config_names(fleurs_reduced_dataset_path)
 
@@ -152,4 +152,4 @@ for lang_code in datasets_dict.keys():
 
     datasets_dict[lang_code]["train"] = datasets_dict[lang_code]["train"].map(add_prediction)
 
-    datasets_dict[lang_code].push_to_hub(fleurs_reduced_dataset_path, lang_code)
+    datasets_dict[lang_code].push_to_hub(fleurs_reduced_dataset_path + "-with-whisper-predictions", lang_code)
