@@ -72,7 +72,7 @@ def prepare_dataset(batch, language_code, do_lower_case=True, do_remove_punctuat
     tokenizer.src_lang = LANGUAGES['en']
     batch["en_labels"] = tokenizer(en_transcription, padding=True, truncation=True, max_length=max_length).input_ids
     
-    tokenizer.src_lang = LANGUAGES[other_transcription]
+    tokenizer.src_lang = LANGUAGES[language_code]
     batch[f"{language_code}_labels"] = tokenizer(other_transcription, padding=True, truncation=True, max_length=max_length).input_ids
 
     return batch
@@ -136,6 +136,24 @@ for lang_code, dataset in vectorized_datasets_dict.items():
         
         src_lang = "en"
         tgt_lang = lang_code
+
+        pred_ids = model.generate(
+            input_features=inputs[f"{src_lang}_transcription"],
+            forced_bos_token_id=tokenizer.convert_tokens_to_ids(LANGUAGES[tgt_lang]),
+            max_new_tokens=int(16 + 1.5 * inputs[f"{lang_code}_transcription"].shape[1]),
+        )
+        
+        input_ids = inputs[f"{tgt_lang}_transcription"]
+
+        preds, labels = decode_preds_and_labels(pred_ids, input_ids, lang_code=tgt_lang)
+
+        all_preds.setdefault((src_lang, tgt_lang), [])
+        all_preds[(src_lang, tgt_lang)].extend(preds)
+
+        all_labels.setdefault((src_lang, tgt_lang), [])
+        all_labels[(src_lang, tgt_lang)].extend(labels)
+
+        src_lang, tgt_lang = tgt_lang, src_lang
 
         pred_ids = model.generate(
             input_features=inputs[f"{src_lang}_transcription"],
