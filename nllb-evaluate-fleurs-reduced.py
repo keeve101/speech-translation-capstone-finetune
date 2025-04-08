@@ -4,7 +4,6 @@ import json
 import zhconv
 import argparse
 from tqdm import tqdm
-from torch.utils.data import DataLoader
 from datasets import load_dataset, get_dataset_config_names
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
@@ -67,7 +66,7 @@ def prepare_dataset(batch, language_code, do_lower_case=True, do_remove_punctuat
     if do_remove_punctuation:
         en_transcription = normalizer(en_transcription).strip()
         other_transcription = normalizer(other_transcription).strip()
-    
+
     tokenizer.src_lang = LANGUAGES['en']
     batch["en_transcription"] = tokenizer(en_transcription, padding=True, truncation=True, max_length=max_length).input_ids
     
@@ -85,6 +84,7 @@ datasets_dict = {language_code: load_dataset(fleurs_reduced_dataset_path, langua
 vectorized_datasets_dict = {key: dataset.map(prepare_dataset, fn_kwargs={"language_code": key, "do_lower_case": True, "do_remove_punctuation": True}).with_format("torch") for key, dataset in datasets_dict.items()}
 
 def decode_preds_and_labels(pred_ids, label_ids, lang_code, do_normalize_eval=True):
+    tokenizer.tgt_lang = LANGUAGES[lang_code]
     # replace -100 with the pad_token_id
     label_ids[label_ids == -100] = tokenizer.pad_token_id
 
@@ -96,8 +96,8 @@ def decode_preds_and_labels(pred_ids, label_ids, lang_code, do_normalize_eval=Tr
         preds = [normalizer(pred) for pred in preds]
         labels = [normalizer(label) for label in labels]
         # filtering step to only evaluate the samples that correspond to non-zero references:
-        preds = [preds[i] for i in range(len(preds)) if len(labels[i]) > 0]
-        labels = [labels[i] for i in range(len(labels)) if len(labels[i]) > 0]
+        # preds = [preds[i] for i in range(len(preds)) if len(labels[i]) > 0]
+        # labels = [labels[i] for i in range(len(labels)) if len(labels[i]) > 0]
     
     if lang_code == 'zh-CN':
         preds = [normalize_zh(pred) for pred in preds]
@@ -121,11 +121,10 @@ results = {}
 for lang_code, dataset in vectorized_datasets_dict.items():
     print(f"\nTranscribing for {lang_code}")
     
-    dataloader = DataLoader(dataset["train"], batch_size=1)
     all_preds = {}
     all_labels = {}
-    for inputs in tqdm(dataloader, desc=f"{lang_code}", unit="batch", total=len(dataloader)):
-        inputs = {k: v.to(device) for k, v in inputs.items()}
+    for inputs in tqdm(dataset["train"], desc=f"{lang_code}", unit="batch", total=len(dataset["train"])):
+        inputs = {k: v.to(device) for k, v in inputs.items() if "transcription" in k}
         """
         inputs = {
             "en_transcription": .input_ids,
@@ -137,14 +136,14 @@ for lang_code, dataset in vectorized_datasets_dict.items():
         tgt_lang = lang_code
 
         pred_ids = model.generate(
-            input_features=inputs[f"{src_lang}_transcription"],
+            input_ids=inputs[f"{src_lang}_transcription"],
             forced_bos_token_id=tokenizer.convert_tokens_to_ids(LANGUAGES[tgt_lang]),
-            max_new_tokens=int(16 + 1.5 * inputs[f"{lang_code}_transcription"].shape[1]),
+            max_new_tokens=int(16 + 1.5 * len(inputs[f"{lang_code}_transcription"])),
         )
         
-        input_ids = inputs[f"{tgt_lang}_transcription"]
+        label_ids = inputs[f"{tgt_lang}_transcription"]
 
-        preds, labels = decode_preds_and_labels(pred_ids, input_ids, lang_code=tgt_lang)
+        preds, labels = decode_preds_and_labels(pred_ids, label_ids, lang_code=tgt_lang)
 
         all_preds.setdefault((src_lang, tgt_lang), [])
         all_preds[(src_lang, tgt_lang)].extend(preds)
@@ -155,14 +154,14 @@ for lang_code, dataset in vectorized_datasets_dict.items():
         src_lang, tgt_lang = tgt_lang, src_lang
 
         pred_ids = model.generate(
-            input_features=inputs[f"{src_lang}_transcription"],
+            input_ids=inputs[f"{src_lang}_transcription"],
             forced_bos_token_id=tokenizer.convert_tokens_to_ids(LANGUAGES[tgt_lang]),
             max_new_tokens=int(16 + 1.5 * inputs[f"{lang_code}_transcription"].shape[1]),
         )
         
-        input_ids = inputs[f"{tgt_lang}_transcription"]
+        label_ids = inputs[f"{tgt_lang}_transcription"]
 
-        preds, labels = decode_preds_and_labels(pred_ids, input_ids, lang_code=tgt_lang)
+        preds, labels = decode_preds_and_labels(pred_ids, label_ids, lang_code=tgt_lang)
 
         all_preds.setdefault((src_lang, tgt_lang), [])
         all_preds[(src_lang, tgt_lang)].extend(preds)
@@ -170,7 +169,8 @@ for lang_code, dataset in vectorized_datasets_dict.items():
         all_labels.setdefault((src_lang, tgt_lang), [])
         all_labels[(src_lang, tgt_lang)].extend(labels)
     
-    for direction, (preds, labels) in all_preds.items():
+    for direction, preds in all_preds.items():
+        labels = all_labels[direction]
         metrics = compute_metrics(preds, labels)
         results[direction] = metrics
         print(direction)
