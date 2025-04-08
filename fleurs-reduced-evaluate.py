@@ -2,8 +2,9 @@ import os
 
 import evaluate
 import json
-from zhconv import zhconv
 
+from tqdm import tqdm
+from zhconv import zhconv
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Audio, get_dataset_config_names
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
@@ -103,13 +104,14 @@ for lang_code, dataset in datasets_dict.items():
     dataloader = DataLoader(dataset, batch_size=8, collate_fn=data_collator)
     all_preds = []  
     all_labels = []
-    for inputs in dataloader:
+    for inputs in tqdm(dataloader, desc=f"{lang_code}", unit="batch", total=len(dataloader)):
         preds = model.generate(**inputs)
         all_preds.extend(preds)
         all_labels.extend(inputs["labels"])
     
     metrics = compute_metrics(all_preds, all_labels, lang_code=lang_code)
     results[lang_code] = metrics
+    pprint(metrics)
     
 with open(output_file_path, "w") as f:
     json.dump(results, f, indent=4)
