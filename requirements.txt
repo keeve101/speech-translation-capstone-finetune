@@ -19,4 +19,4 @@ ctranslate2
 matplotlib
 zhconv
 faster-whisper
-whisperx
+unbabel-comet
