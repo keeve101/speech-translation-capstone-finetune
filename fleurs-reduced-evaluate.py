@@ -126,9 +126,9 @@ for lang_code, dataset in vectorized_datasets_dict.items():
         
         if isinstance(inputs["id"], list):
             for idx in range(len(inputs["id"])):
-                saved_preds[lang_code][inputs["id"][idx]] = preds[idx]
+                saved_preds[lang_code][int(inputs["id"][idx])] = preds[idx]
         else:
-            saved_preds[lang_code][inputs["id"]] = preds
+            saved_preds[lang_code][int(inputs["id"])] = preds
 
         normalized_preds, normalized_labels = map(lambda x: normalize(x, normalizer, lang_code), (preds, labels))
 
@@ -146,7 +146,7 @@ for lang_code in datasets_dict.keys():
     preds = saved_preds[lang_code]
 
     def add_prediction(example):
-        pred = preds.get(example["id"], "")
+        pred = preds.get(int(example["id"]), "")
         example[base_model_name + "-prediction"] = pred
         return example
 
