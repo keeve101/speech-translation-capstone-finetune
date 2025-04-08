@@ -1,10 +1,9 @@
 import os
-
 import torch
 import evaluate
 import json
 import zhconv
-
+import argparse
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Audio, get_dataset_config_names
@@ -13,7 +12,15 @@ from transformers.models.whisper.english_normalizer import BasicTextNormalizer
 from pprint import pprint
 from whisper_lib import DataCollatorSpeechSeq2SeqWithPadding
 
-model_name = "keeve101/whisper-large-v3-turbo-full-finetune-unified-checkpoint-2400"
+# Command-line argument parsing
+parser = argparse.ArgumentParser(description="Transcribe audio using Whisper model.")
+parser.add_argument(
+    '--model_name', type=str, required=True,
+    help="The Hugging Face model name or path for the Whisper model"
+)
+args = parser.parse_args()
+
+model_name = args.model_name
 base_model_name = model_name.split("/")[-1]
 
 output_dir = base_model_name + "-eval"
