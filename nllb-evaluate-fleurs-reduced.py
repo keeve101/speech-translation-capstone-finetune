@@ -6,7 +6,7 @@ import argparse
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from datasets import load_dataset, get_dataset_config_names
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, DataCollatorForSeq2Seq
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
 from pprint import pprint
 
@@ -43,7 +43,6 @@ bleu_metric = evaluate.load("sacrebleu")
 # Use NLLB tokenizer and model instead of Whisper
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-data_collator = DataCollatorForSeq2Seq(tokenizer)
 normalizer = BasicTextNormalizer()
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -70,10 +69,10 @@ def prepare_dataset(batch, language_code, do_lower_case=True, do_remove_punctuat
         other_transcription = normalizer(other_transcription).strip()
     
     tokenizer.src_lang = LANGUAGES['en']
-    batch["en_labels"] = tokenizer(en_transcription, padding=True, truncation=True, max_length=max_length).input_ids
+    batch["en_transcription"] = tokenizer(en_transcription, padding=True, truncation=True, max_length=max_length).input_ids
     
     tokenizer.src_lang = LANGUAGES[language_code]
-    batch[f"{language_code}_labels"] = tokenizer(other_transcription, padding=True, truncation=True, max_length=max_length).input_ids
+    batch[f"{language_code}_transcription"] = tokenizer(other_transcription, padding=True, truncation=True, max_length=max_length).input_ids
 
     return batch
 
@@ -122,7 +121,7 @@ results = {}
 for lang_code, dataset in vectorized_datasets_dict.items():
     print(f"\nTranscribing for {lang_code}")
     
-    dataloader = DataLoader(dataset["train"], batch_size=1, collate_fn=data_collator)
+    dataloader = DataLoader(dataset["train"], batch_size=1)
     all_preds = {}
     all_labels = {}
     for inputs in tqdm(dataloader, desc=f"{lang_code}", unit="batch", total=len(dataloader)):
