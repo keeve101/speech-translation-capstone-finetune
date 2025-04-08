@@ -56,7 +56,7 @@ def insert_spaces_between_characters(text):
     space_removed = "".join([t.strip() for t in text.split()])
     return " ".join(space_removed)
 
-def prepare_dataset(batch, language_code, do_lower_case=True, do_remove_punctuation=True, max_length=1024):
+def prepare_dataset(batch, language_code, do_lower_case=False, do_remove_punctuation=False, max_length=1024):
     en_transcription = batch["en_transcription"]
     other_transcription = batch[f"{language_code}_transcription"]
 
@@ -68,10 +68,10 @@ def prepare_dataset(batch, language_code, do_lower_case=True, do_remove_punctuat
         other_transcription = normalizer(other_transcription).strip()
 
     tokenizer.src_lang = LANGUAGES['en']
-    batch["en_transcription"] = tokenizer(en_transcription, padding=True, truncation=True, max_length=max_length).input_ids
+    batch["en_input_ids"] = tokenizer(en_transcription, padding=True, truncation=True, max_length=max_length, return_tensors="pt").input_ids
     
     tokenizer.src_lang = LANGUAGES[language_code]
-    batch[f"{language_code}_transcription"] = tokenizer(other_transcription, padding=True, truncation=True, max_length=max_length).input_ids
+    batch[f"{language_code}_input_ids"] = tokenizer(other_transcription, padding=True, truncation=True, max_length=max_length, return_tensors="pt").input_ids
 
     return batch
 
@@ -81,7 +81,7 @@ fleurs_reduced_dataset_path = "keeve101/fleurs-reduced"
 configs = get_dataset_config_names(fleurs_reduced_dataset_path)
 datasets_dict = {language_code: load_dataset(fleurs_reduced_dataset_path, language_code) for language_code in configs}
 
-vectorized_datasets_dict = {key: dataset.map(prepare_dataset, fn_kwargs={"language_code": key, "do_lower_case": True, "do_remove_punctuation": True}).with_format("torch") for key, dataset in datasets_dict.items()}
+vectorized_datasets_dict = {key: dataset.map(prepare_dataset, fn_kwargs={"language_code": key, "do_lower_case": False, "do_remove_punctuation": False}).with_format("torch") for key, dataset in datasets_dict.items()}
 
 def decode_preds_and_labels(pred_ids, label_ids, lang_code, do_normalize_eval=True):
     tokenizer.tgt_lang = LANGUAGES[lang_code]
@@ -105,7 +105,7 @@ def decode_preds_and_labels(pred_ids, label_ids, lang_code, do_normalize_eval=Tr
     elif lang_code == "th":
         preds = [insert_spaces_between_characters(pred) for pred in preds]
         labels = [insert_spaces_between_characters(label) for label in labels]
-    
+        
     return preds, labels
 
 def compute_metrics(preds, labels):
@@ -124,24 +124,18 @@ for lang_code, dataset in vectorized_datasets_dict.items():
     all_preds = {}
     all_labels = {}
     for inputs in tqdm(dataset["train"], desc=f"{lang_code}", unit="batch", total=len(dataset["train"])):
-        inputs = {k: v.to(device) for k, v in inputs.items() if "transcription" in k}
-        """
-        inputs = {
-            "en_transcription": .input_ids,
-            "other_transcription": ....
-        }
-        """
+        inputs = {k: v.to(device) for k, v in inputs.items() if "input_ids" in k}
         
         src_lang = "en"
         tgt_lang = lang_code
 
         pred_ids = model.generate(
-            input_ids=inputs[f"{src_lang}_transcription"],
+            input_ids=inputs[f"{src_lang}_input_ids"],
             forced_bos_token_id=tokenizer.convert_tokens_to_ids(LANGUAGES[tgt_lang]),
-            max_new_tokens=int(16 + 1.5 * len(inputs[f"{lang_code}_transcription"])),
+            max_new_tokens=int(16 + 1.5 * inputs[f"{tgt_lang}_input_ids"].shape[1]),
         )
         
-        label_ids = inputs[f"{tgt_lang}_transcription"]
+        label_ids = inputs[f"{tgt_lang}_input_ids"]
 
         preds, labels = decode_preds_and_labels(pred_ids, label_ids, lang_code=tgt_lang)
 
@@ -154,12 +148,12 @@ for lang_code, dataset in vectorized_datasets_dict.items():
         src_lang, tgt_lang = tgt_lang, src_lang
 
         pred_ids = model.generate(
-            input_ids=inputs[f"{src_lang}_transcription"],
+            input_ids=inputs[f"{src_lang}_input_ids"],
             forced_bos_token_id=tokenizer.convert_tokens_to_ids(LANGUAGES[tgt_lang]),
-            max_new_tokens=int(16 + 1.5 * inputs[f"{lang_code}_transcription"].shape[1]),
+            max_new_tokens=int(16 + 1.5 * inputs[f"{tgt_lang}_input_ids"].shape[1]),
         )
         
-        label_ids = inputs[f"{tgt_lang}_transcription"]
+        label_ids = inputs[f"{tgt_lang}_input_ids"]
 
         preds, labels = decode_preds_and_labels(pred_ids, label_ids, lang_code=tgt_lang)
 
