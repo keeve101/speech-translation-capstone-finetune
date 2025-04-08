@@ -3,9 +3,9 @@ import os
 import torch
 import evaluate
 import json
+import zhconv
 
 from tqdm import tqdm
-from zhconv import zhconv
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Audio, get_dataset_config_names
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
@@ -37,11 +37,12 @@ model.to(device)
 
 def normalize_zh(text):
     text = insert_spaces_between_characters(text)
-    text = zhconv(text, "zh-cn") # convert to simplified chinese
+    text = zhconv.convert(text, "zh-cn") # convert to simplified chinese
     return text
 
 def insert_spaces_between_characters(text):
-    return " ".join(text.split())
+    space_removed = "".join([t.strip() for t in text.split()])
+    return " ".join(space_removed)
 
 def prepare_dataset(batch, language_code, do_lower_case=True, do_remove_punctuation=True):
     audio = batch[f"{language_code}_audio"]
