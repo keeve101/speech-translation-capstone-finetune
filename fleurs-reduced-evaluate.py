@@ -1,5 +1,6 @@
 import os
 
+import torch
 import evaluate
 import json
 
@@ -30,6 +31,9 @@ normalizer = BasicTextNormalizer()
 
 model.config.forced_decoder_ids = None
 model.config.suppress_tokens = []
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model.to(device)
 
 def normalize_zh(text):
     text = insert_spaces_between_characters(text)
@@ -105,6 +109,8 @@ for lang_code, dataset in vectorized_datasets_dict.items():
     all_preds = []  
     all_labels = []
     for inputs in tqdm(dataloader, desc=f"{lang_code}", unit="batch", total=len(dataloader)):
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
         preds = model.generate(**inputs)
         all_preds.extend(preds)
         all_labels.extend(inputs["labels"])
