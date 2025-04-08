@@ -98,10 +98,10 @@ def compute_metrics(pred_ids, label_ids, lang_code, do_normalize_eval=True):
 
 results = {}
 
-for lang_code, dataset in datasets_dict.items():
+for lang_code, dataset in vectorized_datasets_dict.items():
     print(f"\nTranscribing for {lang_code}")
     
-    dataloader = DataLoader(dataset, batch_size=8, collate_fn=data_collator)
+    dataloader = DataLoader(dataset["train"], batch_size=8, collate_fn=data_collator)
     all_preds = []  
     all_labels = []
     for inputs in tqdm(dataloader, desc=f"{lang_code}", unit="batch", total=len(dataloader)):
