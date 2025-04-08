@@ -33,6 +33,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
             labels = labels[:, 1:]
 
         batch["labels"] = labels
+        batch["id"] = [feature["id"] for feature in features]
 
         return batch
 
