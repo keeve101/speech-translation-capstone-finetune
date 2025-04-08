@@ -82,7 +82,7 @@ fleurs_reduced_dataset_path = "keeve101/fleurs-reduced"
 configs = get_dataset_config_names(fleurs_reduced_dataset_path)
 datasets_dict = {language_code: load_dataset(fleurs_reduced_dataset_path, language_code) for language_code in configs}
 
-vectorized_datasets_dict = {key: dataset.map(prepare_dataset, remove_columns=list(next(iter(dataset.values())).features), fn_kwargs={"language_code": key, "do_lower_case": True, "do_remove_punctuation": True}).with_format("torch") for key, dataset in datasets_dict.items()}
+vectorized_datasets_dict = {key: dataset.map(prepare_dataset, fn_kwargs={"language_code": key, "do_lower_case": True, "do_remove_punctuation": True}).with_format("torch") for key, dataset in datasets_dict.items()}
 
 def decode_preds_and_labels(pred_ids, label_ids, lang_code, do_normalize_eval=True):
     # replace -100 with the pad_token_id
