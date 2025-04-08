@@ -71,7 +71,7 @@ datasets_dict = {language_code: load_dataset(fleurs_reduced_dataset_path, langua
 
 vectorized_datasets_dict = {key: dataset.map(prepare_dataset, remove_columns=list(next(iter(dataset.values())).features), fn_kwargs={"language_code": key, "do_lower_case": True, "do_remove_punctuation": True}).with_format("torch") for key, dataset in datasets_dict.items()}
 
-def compute_metrics(pred_ids, label_ids, lang_code, do_normalize_eval=True):
+def decode_preds_and_labels(pred_ids, label_ids, lang_code, do_normalize_eval=True):
     # replace -100 with the pad_token_id
     label_ids[label_ids == -100] = processor.tokenizer.pad_token_id
 
@@ -92,7 +92,10 @@ def compute_metrics(pred_ids, label_ids, lang_code, do_normalize_eval=True):
     elif lang_code == "th":
         preds = [insert_spaces_between_characters(pred) for pred in preds]
         labels = [insert_spaces_between_characters(label) for label in labels]
+    
+    return preds, labels
 
+def compute_metrics(preds, labels):
     wer = 100 * wer_metric.compute(predictions=preds, references=labels)
     cer = 100 * cer_metric.compute(predictions=preds, references=labels)
     bleu = bleu_metric.compute(predictions=preds, references=labels, tokenize="intl") 
@@ -111,11 +114,13 @@ for lang_code, dataset in vectorized_datasets_dict.items():
     for inputs in tqdm(dataloader, desc=f"{lang_code}", unit="batch", total=len(dataloader)):
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
-        preds = model.generate(**inputs)
+        pred_ids = model.generate(**inputs)
+        preds, labels = decode_preds_and_labels(pred_ids, inputs["labels"], lang_code=lang_code)
+
         all_preds.extend(preds)
-        all_labels.extend(inputs["labels"])
+        all_labels.extend(labels)
     
-    metrics = compute_metrics(all_preds, all_labels, lang_code=lang_code)
+    metrics = compute_metrics(all_preds, all_labels)
     results[lang_code] = metrics
     pprint(metrics)
     
