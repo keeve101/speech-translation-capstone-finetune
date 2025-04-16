@@ -5,7 +5,6 @@ import json
 import zhconv
 import argparse
 from tqdm import tqdm
-from torch.utils.data import DataLoader
 from datasets import load_dataset, Audio, get_dataset_config_names
 from transformers import AutoProcessor, Wav2Vec2ForCTC
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
@@ -104,13 +103,18 @@ for lang_code, dataset in vectorized_datasets_dict.items():
     BATCH_SIZE = 8
     for i in tqdm(range(0, len(data), BATCH_SIZE), desc=lang_code, unit="batch"):
         batch = data.select(range(i, min(i + BATCH_SIZE, len(data))))
-        input_features = torch.stack([batch[j]["input_features"] for j in range(len(batch))]).to(device)
+        input_features = batch["input_features"]
 
+        preds = []
         with torch.no_grad():
-            logits = model(**input_features).logits
-            pred_ids = torch.argmax(logits, dim=-1)
+            for idx in range(len(batch)):
+                inputs = {k: v for k,v in input_features[idx].items() if isinstance(v, torch.Tensor)}
+                logits = model(**inputs).logits
+                pred_ids = torch.argmax(logits, dim=-1)
 
-        preds = processor.batch_decode(pred_ids, skip_special_tokens=True)
+                pred = processor.batch_decode(pred_ids, skip_special_tokens=True)
+                preds.append(pred)
+
         labels = [example[f"{lang_code}_transcription"] for example in batch]
         
         for idx, example in enumerate(batch):
