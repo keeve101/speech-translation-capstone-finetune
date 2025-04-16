@@ -156,9 +156,9 @@ python evaluation/nllb-evaluate-with-comet.py \
 
 | Model Name                                             | Script Used                                    | Batch Size | Grad Accum Steps | GPUs Used      | Notes                                      |
 |--------------------------------------------------------|------------------------------------------------|------------|------------------|----------------|--------------------------------------------|
-| whisper-large-v3-turbo-full-finetune-unified           | `whisper-finetune-full-unified.py`             | 64         | 1                | 1×L40S (48GB)  | Full finetuning on unified multilingual set |
-| whisper-large-v3-turbo-lora-unified                    | `whisper-finetune-lora-unified.py`             | 16         | 2               | 1×V100 (32GB)  | Lightweight finetuning using LoRA          |
-| nllb-200-distilled-600M-lora-balanced-multi-corpora    | `nllb-finetune-lora-balanced-multi-corpora.py` | 4         | 2                | 1×V100 (32GB)  | Balanced multilingual corpora              |
+| keeve101/whisper-large-v3-turbo-full-finetune-unified           | `whisper-finetune-full-unified.py`             | 64         | 1                | 1×L40S (48GB)  | Full finetuning on unified multilingual set |
+| keeve101/whisper-large-v3-turbo-lora-unified                    | `whisper-finetune-lora-unified.py`             | 16         | 2               | 1×V100 (32GB)  | Lightweight finetuning using LoRA          |
+| keeve101/nllb-200-distilled-600M-lora-balanced-multi-corpora    | `nllb-finetune-lora-balanced-multi-corpora.py` | 4         | 2                | 1×V100 (32GB)  | Balanced multilingual corpora              |
 - Python version used: 3.11
 - CUDA version used: 12.8.1
 - The batch size and gradient accumulation steps were chosen both empirically and based on recommedations from Whisper authors at [whisper-fine-tune-event](https://github.com/huggingface/community-events/tree/main/whisper-fine-tuning-event).
