@@ -98,25 +98,25 @@ results = {}
 for lang_code, dataset in vectorized_datasets_dict.items():
     print(f"\nTranscribing for {lang_code}")
     
-    dataloader = DataLoader(dataset["train"], batch_size=8)
+    data = dataset["train"]
     all_preds = []  
     all_labels = []
-    for inputs in tqdm(dataloader, desc=f"{lang_code}", unit="batch", total=len(dataloader)):
+    BATCH_SIZE = 8
+    for i in tqdm(range(0, len(data), BATCH_SIZE), desc=lang_code, unit="batch"):
+        batch = data[i: i+BATCH_SIZE]
+        input_features = torch.stack([example["input_features"] for example in batch]).to(device)
+
         with torch.no_grad():
-            inputs_on_device = {k: v.to(device) for k, v in inputs.items() if isinstance(v, torch.Tensor)}
-            logits = model(**inputs_on_device).logits
+            logits = model(**input_features).logits
             pred_ids = torch.argmax(logits, dim=-1)
 
-            preds = processor.batch_decode(pred_ids, skip_special_tokens=True)
+        preds = processor.batch_decode(pred_ids, skip_special_tokens=True)
+        labels = [example[f"{lang_code}_transcription"] for example in batch]
         
-        if isinstance(inputs["id"], list):
-            for idx in range(len(inputs["id"])):
-                saved_preds[lang_code][int(inputs["id"][idx])] = preds[idx]
-        else:
-            saved_preds[lang_code][int(inputs["id"])] = preds
+        for idx, example in enumerate(batch):
+            saved_preds[lang_code][int(example["id"])] = preds[idx]
 
-        normalized_preds, normalized_labels = map(lambda x: normalize(x, normalizer, lang_code), (preds, inputs[f"{lang_code}_transcription"]))
-
+        normalized_preds, normalized_labels = map(lambda x: normalize(x, normalizer, lang_code), (preds, labels))
         all_preds.extend(normalized_preds)
         all_labels.extend(normalized_labels)
     
