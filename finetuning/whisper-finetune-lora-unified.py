@@ -17,7 +17,8 @@ language_codes = [key for key in LANGUAGES.keys()]
 cv_unified_dataset_path = "keeve101/common-voice-unified-splits"
 magic_hub_ms_tl_dataset_path = "keeve101/magic-hub-ms-tl-datasets"
 
-processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3-turbo", task="transcribe", predict_timestamps=False)
+model_path = "openai/whisper-large-v3-turbo"
+processor = WhisperProcessor.from_pretrained(model_path, task="transcribe", predict_timestamps=False)
 
 combine_train_val = True # whether to combine train and validation into one dataset
 
@@ -71,7 +72,7 @@ wer_metric = evaluate.load("wer")
 cer_metric = evaluate.load("cer")
 bleu_metric = evaluate.load("sacrebleu")
 
-model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3-turbo")
+model = WhisperForConditionalGeneration.from_pretrained(model_path)
 
 model.config.forced_decoder_ids = None
 model.config.suppress_tokens = []

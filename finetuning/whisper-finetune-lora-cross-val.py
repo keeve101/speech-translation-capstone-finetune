@@ -10,7 +10,8 @@ language_codes = [key for key in LANGUAGES.keys()]
 
 dataset_path = "keeve101/common-voice-unified-splits"
 
-processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3-turbo", task="transcribe", predict_timestamps=False)
+model_path = "openai/whisper-large-v3-turbo"
+processor = WhisperProcessor.from_pretrained(model_path, task="transcribe", predict_timestamps=False)
 
 dataset_dicts = {key: take_dataset(dataset_path, key, split_percentage="", streaming=False, subsample_size=500) for key in language_codes}
 for key, dataset in dataset_dicts.items():
@@ -32,7 +33,7 @@ wer_metric = evaluate.load("wer")
 cer_metric = evaluate.load("cer")
 bleu_metric = evaluate.load("sacrebleu")
 
-model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3-turbo")
+model = WhisperForConditionalGeneration.from_pretrained(model_path)
 
 model.config.forced_decoder_ids = None
 model.config.suppress_tokens = []
