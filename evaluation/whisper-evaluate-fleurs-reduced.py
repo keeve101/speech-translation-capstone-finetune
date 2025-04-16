@@ -7,7 +7,7 @@ import argparse
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Audio, get_dataset_config_names
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
+from transformers import WhisperProcessor, WhisperForConditionalGeneration, AutoProcessor, Wav2Vec2ForCTC
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
 from pprint import pprint
 from whisper_lib import DataCollatorSpeechSeq2SeqWithPadding
@@ -31,8 +31,12 @@ wer_metric = evaluate.load("wer")
 cer_metric = evaluate.load("cer")
 bleu_metric = evaluate.load("sacrebleu")
 
-processor = WhisperProcessor.from_pretrained(model_name, task="transcribe", predict_timestamps=False)
-model = WhisperForConditionalGeneration.from_pretrained(model_name)
+if "mms" in model_name:
+    processor = AutoProcessor.from_pretrained(model_name)
+    model = Wav2Vec2ForCTC.from_pretrained(model_name)
+else:
+    processor = WhisperProcessor.from_pretrained(model_name, task="transcribe", predict_timestamps=False)
+    model = WhisperForConditionalGeneration.from_pretrained(model_name)
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
 normalizer = BasicTextNormalizer()
 
@@ -71,7 +75,7 @@ def prepare_dataset(batch, language_code, do_lower_case=True, do_remove_punctuat
     batch["labels"] = processor.tokenizer(transcription).input_ids
     return batch
 
-fleurs_reduced_dataset_path = "keeve101/fleurs-reduced" + "-with-whisper-predictions"
+fleurs_reduced_dataset_path = "keeve101/fleurs-reduced"
 
 configs = get_dataset_config_names(fleurs_reduced_dataset_path)
 
@@ -152,4 +156,4 @@ for lang_code in datasets_dict.keys():
 
     datasets_dict[lang_code]["train"] = datasets_dict[lang_code]["train"].map(add_prediction)
 
-    datasets_dict[lang_code].push_to_hub(fleurs_reduced_dataset_path, lang_code)
+    datasets_dict[lang_code].push_to_hub(fleurs_reduced_dataset_path + "baseline-model-evaluations", lang_code)
