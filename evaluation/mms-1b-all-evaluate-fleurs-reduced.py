@@ -103,8 +103,8 @@ for lang_code, dataset in vectorized_datasets_dict.items():
     all_labels = []
     BATCH_SIZE = 8
     for i in tqdm(range(0, len(data), BATCH_SIZE), desc=lang_code, unit="batch"):
-        batch = data[i: i+BATCH_SIZE]
-        input_features = torch.stack([example["input_features"] for example in batch]).to(device)
+        batch = data.select(range(i, min(i + BATCH_SIZE, len(data))))
+        input_features = torch.stack([batch[j]["input_features"] for j in range(len(batch))]).to(device)
 
         with torch.no_grad():
             logits = model(**input_features).logits
