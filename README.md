@@ -1,6 +1,14 @@
 # CrossTalk Secure Finetuning Code Repository
 Code repository containing code for finetuning and evaluating models for the CrossTalk Secure project.
 
+CrossTalk Secure is a compact, portable offline speech-to-speech translation device designed to deliver accurate, low-latency translations while ensuring user privacy and security. Tailored for security personnel operating in Southeast Asia, it facilitates seamless and secure communication with foreigners, helping to overcome language barriers in an interconnected world where tourism is on the rise.
+
+Handling the software portion of the translation device, we finetune the models: [whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo) and [nllb-200-distilled-600M](https://huggingface.co/facebook/nllb-200-distilled-600M).
+
+![Translation Pipeline](assets/cascade-pipeline.png)
+
+## File Structure
+
 ```
 ├── preprocessing                                       | Preprocessing notebooks for data
 │   ├── fleurs-subsets-upload.ipynb 
@@ -39,6 +47,73 @@ Code repository containing code for finetuning and evaluating models for the Cro
 └── requirements.txt
 ```
 
+## Datasets
+To support the languages of the device, we curated a range of datasets for training and evaluation.
+
+### Supported Languages 
+
+| Language         | ISO Code |
+| ---------------- | -------- |
+| English          | `en`     |
+| Chinese          | `zh`     |
+| Indonesian       | `id`     |
+| Tagalog/Filipino | `tl`     |
+| Hindi            | `hi`     |
+| Thai             | `th`     |
+| Vietnamese       | `vi`     |
+| Malay            | `ms`     |
+
+### Text-to-Text Translation Datasets
+
+Combined into the consolidated dataset: [keeve101/balanced-multi-corpora-mt](https://huggingface.co/datasets/keeve101/balanced-multi-corpora-mt)
+
+These datasets span a range of language pairs and sources, curated to support the languages of the device.
+
+|Dataset|
+|------------------------------------------------------------------------------------------------|
+| [shareAI/ShareGPT-Chinese-English-90k](https://huggingface.co/datasets/shareAI/ShareGPT-Chinese-English-90k/tree/main/sharegpt_jsonl) |
+| [Wikidepia/IndoParaCrawl](https://huggingface.co/datasets/Wikidepia/IndoParaCrawl/tree/main)  |
+| [rhyliieee/tagalog-filipino-english-translation](https://huggingface.co/datasets/rhyliieee/tagalog-filipino-english-translation/tree/main) |
+| [baudm/tl2en-nmt](https://github.com/baudm/tl2en-nmt/tree/master/corpus/corrected)             |
+| [cfilt/iitb-english-hindi](https://huggingface.co/datasets/cfilt/iitb-english-hindi/tree/main/data) |
+| [vistec-AI/scb-mt-en-th-2020_v1.0](https://github.com/vistec-AI/dataset-releases/releases/tag/scb-mt-en-th-2020_v1.0) |
+| [stefan-it/nmt-en-vi](https://github.com/stefan-it/nmt-en-vi/tree/master/data)                |
+| [Corpus-OpenSubtitles](https://opus.nlpl.eu/OpenSubtitles/ms&en/v2024/OpenSubtitles)          |
+
+### Speech-to-text Translation Datasets
+The datasets were sourced from various deltas from [Common Voice](https://commonvoice.mozilla.org/en/datasets), as well as the Malay and Tagalog open-source datasets from [MagicHub](https://magichub.com/datasets/).
+
+| Dataset                                                                                        |
+|------------------------------------------------------------------------------------------------|
+| [keeve101/common-voice-unified-splits](https://huggingface.co/datasets/keeve101/common-voice-unified-splits) |
+| [keeve101/magic-hub-ms-tl-datasets](https://huggingface.co/datasets/keeve101/magic-hub-ms-tl-datasets) |
+
+### Evaluation Datasets
+Along with test splits for each dataset, we used a reduced version of the [FLEURS](https://huggingface.co/datasets/google/fleurs) dataset for evaluation, looking out for out-of-domain performance and model robustness.
+
+| Dataset                                                                                   |
+|------------------------------------------------------------------------------------------------|
+| [keeve101/fleurs-reduced](https://huggingface.co/datasets/keeve101/fleurs-reduced)            |
+| [keeve101/fleurs-conversations](https://huggingface.co/datasets/keeve101/fleurs-conversations)|
+
+### Results
+
+Following fine-tuning, overall performance improvements were observed across the Whisper and NLLB-200 models, as measured by [WER](https://huggingface.co/spaces/evaluate-metric/wer), [SacreBLEU](https://huggingface.co/spaces/evaluate-metric/sacrebleu), and [COMET](https://huggingface.co/spaces/evaluate-metric/comet) scores. 
+
+For Whisper, while most languages improved, there were some performance drops in languages like Malay and Tagalog, contrasted by significant gains in Chinese and Hindi transcription accuracy.
+
+NLLB-200 exhibited consistent improvements across all translation directions, suggesting effective adaptation during fine-tuning.
+
+We report [SacreBLEU](https://huggingface.co/spaces/evaluate-metric/sacrebleu) scores on the fleurs-reduced dataset for both models as the primary evaluation metric.
+
+#### Whisper-Large-v3-Turbo
+![Fleurs-reduced sacreBleu results for finetuned Whisper-Large-v3-Turbo](assets/fleurs-reduced-sacrebleu-whisper-large-v3-turbo.png)
+
+
+#### NLLB-200
+![Fleurs-reduced sacreBleu results for finetuned NLLB-200](assets/fleurs-reduced-sacrebleu-nllb-200.png)
+
+
 ## Setup
 
 1. **Clone the repository**  
@@ -72,6 +147,13 @@ Code repository containing code for finetuning and evaluating models for the Cro
 - `jfk.flac`  
   Sample audio file (John F. Kennedy speech) used for testing inference pipelines on the evaluate example scripts.
 
+## Preprocessing
+
+The [`preprocessing`](./preprocessing) notebooks:
+- Upload and slice subsets of the FLEURS dataset
+- Parse open-source datasets (e.g., MagicHub)
+- Normalize and prepare text-to-text and speech-to-text corpora
+
 ## Finetuning
 
 See the [`finetuning`](./finetuning) directory for training scripts:
@@ -85,12 +167,6 @@ Evaluation scripts are in the [`evaluation`](./evaluation) folder and include:
 - Support for Whisper and NLLB models
 - CTranslate2 and Transformers inference backends
 
-## Preprocessing
-
-The [`preprocessing`](./preprocessing) notebooks:
-- Upload and slice subsets of the FLEURS dataset
-- Parse open-source datasets (e.g., MagicHub)
-- Normalize and prepare text-to-text and speech-to-text corpora
 
 ## Usage
 
@@ -151,6 +227,13 @@ python evaluation/nllb-evaluate-with-comet.py \
   --nllb_model_used facebook/nllb-200-distilled-600M
 ```
 
+## Limitations
+Publicly available data is limited for certain languages, particularly Malay and Tagalog, and often lacks contextual relevance to the intended use case. Consequently, the data used may not have been fully validated and was significantly constrained by the availability of clean, relevant datasets. For future enhancements, allocating a dedicated research team to curate high-quality, context-specific fine-tuning data would be advantageous for improving model accuracy. 
+
+Another challenge we faced was with potential data leakage from publicly available datasets. Though we attempted to cross-reference our data sources with sources cited from the authors of Whisper Large-v3-Turbo and NLLB-200, Whisper's training data remains undisclosed, which limits our ability to guarantee full separation. 
+
+To mitigate this, we prioritized datasets released after the model's official release date. For future iterations, a more rigorous approach would involve procuring proprietary datasets or curating a bespoke dataset tailored to our specific domain, particularly in the context of secure communications, and the data's origin verified.
+
 ## Notes
 ### Previous Finetuning Run Statistics
 
@@ -159,6 +242,9 @@ python evaluation/nllb-evaluate-with-comet.py \
 | keeve101/whisper-large-v3-turbo-full-finetune-unified           | `whisper-finetune-full-unified.py`             | 64         | 1                | 1×L40S (48GB)  | Full finetuning on unified multilingual set |
 | keeve101/whisper-large-v3-turbo-lora-unified                    | `whisper-finetune-lora-unified.py`             | 16         | 2               | 1×V100 (32GB)  | Lightweight finetuning using LoRA          |
 | keeve101/nllb-200-distilled-600M-lora-balanced-multi-corpora    | `nllb-finetune-lora-balanced-multi-corpora.py` | 4         | 2                | 1×V100 (32GB)  | Balanced multilingual corpora              |
+
+---
+
 - Python version used: 3.11
 - CUDA version used: 12.8.1
 - The batch size and gradient accumulation steps were chosen both empirically and based on recommedations from Whisper authors at [whisper-fine-tune-event](https://github.com/huggingface/community-events/tree/main/whisper-fine-tuning-event).
